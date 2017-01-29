@@ -7,8 +7,16 @@ import org.http4s.blaze.util.{BufferTools, Execution}
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 
-/** Representation of a HTTP message body */
+/** Representation of a HTTP message body
+  *
+  * @note The release of resources must be idempotent, meaning that `discard()` may
+  *       be called after complete consumption of the body and it may also be called
+  *       numerous times.
+  */
 trait MessageBody {
+
+  /** Throw away this `MessageBody` */
+  def discard(): Unit // TODO: should this be a Future[Unit]? It would be nice as a
 
   /** Get a `Future` which may contain message body data.
     *
@@ -43,11 +51,17 @@ trait MessageBody {
 
 private object MessageBody {
   val emptyMessageBody: MessageBody = new MessageBody {
+    override def discard(): Unit = ()
     override def apply(): Future[ByteBuffer] = BufferTools.emptyFutureBuffer
   }
 
   def apply(buffer: ByteBuffer): MessageBody = new MessageBody {
     private var buff = buffer
+
+    override def discard(): Unit = this.synchronized {
+      buff = BufferTools.emptyBuffer
+    }
+
     override def apply(): Future[ByteBuffer] = this.synchronized {
       if (buff.hasRemaining) {
         val b = buff

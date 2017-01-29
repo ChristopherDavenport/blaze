@@ -224,6 +224,10 @@ class Http2ServerStage(streamId: Int,
 
     private val lock = this
 
+    override def discard(): Unit = lock.synchronized {
+      finished = true
+    }
+
     def apply(): Future[ByteBuffer] = lock.synchronized {
       if (finished) MessageBody.emptyMessageBody()
       else {

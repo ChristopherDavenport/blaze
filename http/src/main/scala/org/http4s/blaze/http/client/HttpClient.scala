@@ -1,92 +1,49 @@
 package org.http4s.blaze.http.client
 
-import java.net.InetSocketAddress
-import java.nio.ByteBuffer
-import javax.net.ssl.SSLContext
+import org.http4s.blaze.http.{HttpRequest, MessageBody}
+import org.http4s.blaze.util.Execution
 
-import org.http4s.blaze.channel.nio2.ClientChannelFactory
-import org.http4s.blaze.pipeline.stages.SSLStage
-import org.http4s.blaze.pipeline.{Command, LeafBuilder}
-import org.http4s.blaze.util.{Execution, GenericSSLContext}
+import scala.concurrent.Future
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration.Duration
 
-trait HttpClient {
+trait HttpClient extends ClientActions {
 
-  protected def getConnection(host: String, port: Int, scheme: String, timeout: Duration): Future[HttpClientStage]
-
-  protected def returnConnection(stage: HttpClientStage): Unit
-
-  protected def closeConnection(stage: HttpClientStage): Unit
-
-  /** Execute a request. This is the entry method for client usage */
-  protected def runReq[A](method: String,
-                          url: String,
-                          headers: Seq[(String, String)],
-                          body: ByteBuffer,
-                          timeout: Duration)
-                         (action: ClientResponse => Future[A])(implicit ec: ExecutionContext): Future[A] = {
-
-    val (host, port, scheme, uri) = HttpClient.parseURL(url)
-
-    getConnection(host, port, scheme, timeout).flatMap { stage =>
-
-      val f = stage.makeRequest(method, host, uri, headers, body).flatMap(action)
-      // Shutdown our connection
-      f.onComplete( _ => returnConnection(stage))(Execution.directec)
-      f
-    }
-  }
-}
-
-/** The default client is 'connection per request' */
-object HttpClient extends HttpClient with ClientActions {
-  private lazy val connectionManager = new ClientChannelFactory()
-
-  private val sslContext: SSLContext = GenericSSLContext.clientSSLContext()
-
-  override protected def returnConnection(stage: HttpClientStage): Unit = closeConnection(stage)
-
-  override protected def closeConnection(stage: HttpClientStage): Unit = {
-    stage.sendOutboundCommand(Command.Disconnect)
+  /** ClientResponse that can be released */
+  trait ReleaseableResponse extends ClientResponse {
+    /** Releases the resources associated with this dispatch
+      *
+      * This may entail closing the connection or returning it to a connection
+      * pool, depending on the client implementation and the state of the session
+      * responsible for dispatching the associated request.
+      *
+      * @note `release()` is idempotent
+      */
+    def release(): Unit
   }
 
-  override protected def getConnection(host: String, port: Int, scheme: String, timeout: Duration): Future[HttpClientStage] = {
-    connectionManager.connect(new InetSocketAddress(host, port)).map { head =>
-      val clientStage = new HttpClientStage(timeout)
+  /** Dispatch a request, resulting in the response
+    *
+    * @param request request to dispatch
+    * @return the response. The cleanup of the resources associated with
+    *         this dispatch are tied to the [[MessageBody]] of the [[ClientResponse]].
+    *         Release of resources is triggered by complete consumption of the `MessageBody`
+    *         or by calling `MessageBody.discard()`, whichever comes first.
+    */
+  def unsafeDispatch(request: HttpRequest): Future[ReleaseableResponse]
 
-      if (scheme.equalsIgnoreCase("https")) {
-        val eng = sslContext.createSSLEngine()
-        eng.setUseClientMode(true)
-        LeafBuilder(clientStage).prepend(new SSLStage(eng)).base(head)
-      }
-      else LeafBuilder(clientStage).base(head)
-
-      head.sendInboundCommand(Command.Connected)
-
-      clientStage
+  /** Safely dispatch a client request
+    *
+    * Resources associated with this dispatch are guarenteed to be cleaned up during the
+    * resolution of the returned `Future[T]`, regardless of if it is successful or not.
+ *
+    * @note The resources _may_ be cleaned up before the future resolves, but this is
+    *       dependant on wheither
+    */
+  def apply[T](request: HttpRequest)(f: ClientResponse => Future[T]): Future[T] = {
+    unsafeDispatch(request).flatMap { resp =>
+      val result = f(resp)
+      result.onComplete { _ => resp.release() }(Execution.directec)
+      result
     }(Execution.directec)
-  }
-
-  // TODO: the robustness of this method to varying input is highly questionable
-  private def parseURL(url: String): (String, Int, String, String) = {
-    val uri = java.net.URI.create(if (isPrefixedWithHTTP(url)) url else "http://" + url)
-
-    val port = if (uri.getPort > 0) uri.getPort else (if (uri.getScheme.equalsIgnoreCase("http")) 80 else 443)
-
-    (uri.getHost,
-      port,
-      uri.getScheme,
-      if (uri.getQuery != null) uri.getPath + "?" + uri.getQuery else uri.getPath
-      )
-  }
-
-  private def isPrefixedWithHTTP(string: String): Boolean = {
-    string.length >= 4 &&
-      (string.charAt(0) == 'h' || string.charAt(0) == 'H') &&
-      (string.charAt(1) == 't' || string.charAt(1) == 'T') &&
-      (string.charAt(2) == 't' || string.charAt(2) == 'T') &&
-      (string.charAt(3) == 'p' || string.charAt(3) == 'P')
   }
 }
