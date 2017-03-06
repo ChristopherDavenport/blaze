@@ -1,7 +1,5 @@
 package org.http4s.blaze.http
 
-import java.net.InetSocketAddress
-
 import org.http4s.blaze.util.Execution
 
 import scala.concurrent.ExecutionContext

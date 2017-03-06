@@ -1,0 +1,96 @@
+package org.http4s.blaze.http.http2
+
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets.UTF_8
+
+import scala.collection.mutable
+
+sealed abstract class Http2Exception(msg: String) extends Exception(msg) {
+
+  def code: Int
+
+  def stream: Int
+
+  final def name: String = Http2Exception.errorName(code)
+
+  /** Wrap this exception in an [[Error]] */
+  final def toError: Error = Error(this)
+
+  /** Determine if this is a stream or connection error */
+  final def isStreamError: Boolean = this.isInstanceOf[Http2StreamException]
+
+  /** serialize the message as a `ByteBuffer` */
+  final def msgBuffer(): ByteBuffer = ByteBuffer.wrap(msg.getBytes(UTF_8))
+}
+
+final case class Http2StreamException(stream: Int, code: Int, msg: String) extends Http2Exception(msg)
+
+final case class Http2SessionException(code: Int, msg: String) extends Http2Exception(msg) {
+  override def stream: Int = 0
+}
+
+///////////////////// HTTP/2.0 Errors //////////////////////////////
+object Http2Exception {
+
+  final class ErrorGen private[http2](val code: Int, val name: String) {
+    /** Create a Http2Exception with stream id 0 */
+    def goaway(): Http2Exception = Http2SessionException(code, name)
+
+    /** Create a Http2Exception with stream id 0 */
+    def goaway(msg: String): Http2Exception = Http2SessionException(code, name + ": " + msg)
+
+    /** Create a Http2Exception with the requisite stream id */
+    def rst(stream: Int): Http2Exception = rst(stream, name)
+
+    /** Create a Http2Exception with the requisite stream id */
+    def rst(stream: Int, msg: String): Http2Exception = {
+      require(stream > 0)
+      Http2StreamException(stream, code, msg)
+    }
+
+    /** Extract the optional stream id and the exception message */
+    def unapply(ex: Http2Exception): Option[(Option[Int], String)] = {
+      if (ex.code == code) {
+        val stream = if (ex.isStreamError) Some(ex.stream) else None
+        Some(stream -> ex.getMessage)
+      }
+      else None
+    }
+
+    def unapply(code: Int): Option[Unit] = {
+      if (code == this.code) Some(()) else None
+    }
+
+    override val toString: String = s"$name(0x${Integer.toHexString(code)})"
+  }
+
+  /** Get the name associated with the error code */
+  def errorName(code: Int): String = exceptionsMap.get(code)
+    .map(_.name)
+    .getOrElse(s"UNKNOWN(0x${Integer.toHexString(code)}")
+
+
+  private val exceptionsMap = new mutable.HashMap[Int, ErrorGen]()
+
+  private def mkErrorGen(code: Int, name: String): ErrorGen = {
+    val g = new ErrorGen(code, name)
+    exceptionsMap += ((code, g))
+    g
+  }
+
+  val NO_ERROR                 = mkErrorGen(0x0, "NO_ERROR")
+  val PROTOCOL_ERROR           = mkErrorGen(0x1, "PROTOCOL_ERROR")
+  val INTERNAL_ERROR           = mkErrorGen(0x2, "INTERNAL_ERROR")
+  val FLOW_CONTROL_ERROR       = mkErrorGen(0x3, "FLOW_CONTROL_ERROR")
+  val SETTINGS_TIMEOUT         = mkErrorGen(0x4, "SETTINGS_TIMEOUT")
+  val STREAM_CLOSED            = mkErrorGen(0x5, "STREAM_CLOSED")
+  val FRAME_SIZE_ERROR         = mkErrorGen(0x6, "FRAME_SIZE_ERROR")
+  val REFUSED_STREAM           = mkErrorGen(0x7, "REFUSED_STREAM")
+  val CANCEL                   = mkErrorGen(0x8, "CANCEL")
+  val COMPRESSION_ERROR        = mkErrorGen(0x9, "COMPRESSION_ERROR")
+  val CONNECT_ERROR            = mkErrorGen(0xa, "CONNECT_ERROR")
+  val ENHANCE_YOUR_CALM        = mkErrorGen(0xb, "ENHANCE_YOUR_CALM")
+  val INADEQUATE_SECURITY      = mkErrorGen(0xc, "INADEQUATE_SECURITY")
+  val HTTP_1_1_REQUIRED        = mkErrorGen(0xd, "HTTP_1_1_REQUIRED")
+
+}

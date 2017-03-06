@@ -68,6 +68,6 @@ object ExampleService {
     }
   }
 
-  private val bigstring = StandardCharsets.UTF_8.encode((0 to 1024*20).mkString("\n", "\n", ""))
+  private val bigstring = StandardCharsets.UTF_8.encode((0 to 1024*2000).mkString("\n", "\n", ""))
   private val helloWorld = StandardCharsets.UTF_8.encode("Hello, world!")
 }
