@@ -5,12 +5,12 @@ import java.nio.ByteBuffer
 import org.http4s.blaze.http._
 import org.http4s.blaze.http.http2.Http2Exception._
 
-import scala.collection.Map
+import scala.collection.mutable.Map
 
 /** Receives frames from the `Http20FrameDecoder`
   *
-  * Concurrency is not controlled; it is expected that these operations will happen
-  * inside t thread safe environment managed by the [[SessionImpl]].
+  * Concurrency is not controlled by this type; it is expected that thread safety
+  * will be managed by the [[Http2SessionImpl]].
   */
 private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     mySettings: Http2Settings,
@@ -47,6 +47,9 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
   /** A Ping frame has been received, either new or an ping ACK */
   override def onPingFrame(ack: Boolean, data: Array[Byte]): Http2Result
 
+  /** Handle a valid and complete PUSH_PROMISE frame */
+  protected def handlePushPromise(streamId: Int, promisedId: Int, headers: Headers): Http2Result
+
   // Concrete methods ////////////////////////////////////////////////////////////////////
 
   override def onCompleteHeadersFrame(streamId: Int, priority: Option[Priority], endStream: Boolean, headers: Headers): Http2Result = {
@@ -66,7 +69,16 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     }
   }
 
-  override def onCompletePushPromiseFrame(streamId: Int, promisedId: Int, headers: Headers): Http2Result = ???
+  // See https://tools.ietf.org/html/rfc7540#section-6.6 for the list of rules
+  override def onCompletePushPromiseFrame(streamId: Int, promisedId: Int, headers: Headers): Http2Result = {
+    if (!mySettings.pushEnabled)
+      PROTOCOL_ERROR.goaway("Received PUSH_PROMISE frame then they are disallowed").toError
+    else if (!idManager.isInboundId(promisedId))
+      PROTOCOL_ERROR.goaway(s"Received PUSH_PROMISE frame with illegal stream id: $promisedId").toError
+    else if (!idManager.observeInboundId(promisedId))
+      PROTOCOL_ERROR.goaway("Received PUSH_PROMISE frame on non-idle stream").toError
+    else handlePushPromise(streamId, promisedId, headers)
+  }
 
   override def onDataFrame(streamId: Int, isLast: Boolean, data: ByteBuffer, flow: Int): Http2Result = {
     activeStreams.get(streamId) match {
@@ -93,14 +105,15 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     if (idManager.isIdleOutboundId(streamId) || idManager.isIdleInboundId(streamId))
       PROTOCOL_ERROR.goaway(s"RST_STREAM for idle stream id $streamId").toError
     else {
-      activeStreams.get(streamId).foreach(_.streamReset())
+      // We remove it from the active streams first so that we don't send our own RST_STREAM
+      // frame as a response. https://tools.ietf.org/html/rfc7540#section-5.4.2
+      activeStreams
+        .remove(streamId)
+        .foreach(_.closeWithError(Some(Http2Exception.errorGenerator(code).rst(streamId))))
+
       Continue
     }
   }
-
-//  override def onSettingsFrame(ack: Boolean, settings: Seq[Setting]): Http2Result = ???
-//
-//  override def onGoAwayFrame(lastStream: Int, errorCode: Long, debugData: ByteBuffer): Http2Result = ???
 
   override def onWindowUpdateFrame(streamId: Int, sizeIncrement: Int): Http2Result = {
     if (streamId == 0) {

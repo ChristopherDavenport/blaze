@@ -17,7 +17,15 @@ sealed abstract class Http2Exception(msg: String) extends Exception(msg) {
   final def toError: Error = Error(this)
 
   /** Determine if this is a stream or connection error */
-  final def isStreamError: Boolean = this.isInstanceOf[Http2StreamException]
+  final def isStreamError: Boolean = stream > 0
+
+  /** Was the exception due to refusal by the peer.
+    *
+    * These exceptions are safe to automatically retry even if the HTTP method
+    * is not an idempotent method. See https://tools.ietf.org/html/rfc7540#section-8.1.4
+    * for more details.
+    */
+  final def isRefusedStream: Boolean = code == Http2Exception.REFUSED_STREAM.code
 
   /** serialize the message as a `ByteBuffer` */
   final def msgBuffer(): ByteBuffer = ByteBuffer.wrap(msg.getBytes(UTF_8))
@@ -32,7 +40,7 @@ final case class Http2SessionException(code: Int, msg: String) extends Http2Exce
 ///////////////////// HTTP/2.0 Errors //////////////////////////////
 object Http2Exception {
 
-  final class ErrorGen private[http2](val code: Int, val name: String) {
+  final class ErrorGenerator private[http2](val code: Int, val name: String) {
     /** Create a Http2Exception with stream id 0 */
     def goaway(): Http2Exception = Http2SessionException(code, name)
 
@@ -64,16 +72,18 @@ object Http2Exception {
     override val toString: String = s"$name(0x${Integer.toHexString(code)})"
   }
 
+  def errorGenerator(code: Int): ErrorGenerator = exceptionsMap.get(code) match {
+    case Some(gen) => gen
+    case None => new ErrorGenerator(code, s"UNKNOWN(0x${Integer.toHexString(code)})")
+  }
+
   /** Get the name associated with the error code */
-  def errorName(code: Int): String = exceptionsMap.get(code)
-    .map(_.name)
-    .getOrElse(s"UNKNOWN(0x${Integer.toHexString(code)}")
+  def errorName(code: Int): String = errorGenerator(code).name
 
+  private[this] val exceptionsMap = new mutable.HashMap[Int, ErrorGenerator]()
 
-  private val exceptionsMap = new mutable.HashMap[Int, ErrorGen]()
-
-  private def mkErrorGen(code: Int, name: String): ErrorGen = {
-    val g = new ErrorGen(code, name)
+  private def mkErrorGen(code: Int, name: String): ErrorGenerator = {
+    val g = new ErrorGenerator(code, name)
     exceptionsMap += ((code, g))
     g
   }

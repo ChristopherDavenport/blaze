@@ -63,7 +63,7 @@ private class Http2ClientConnectionImpl(
     }
   }
 
-  // TODO: this could be more interesting
+  // TODO: this could be more interesting and is probably interesting for the server, too.
   override def quality: Double =
     1.0 - activeStreamCount.toDouble/peerSettings.maxInboundStreams.toDouble
 
@@ -71,7 +71,7 @@ private class Http2ClientConnectionImpl(
     *
     * This will generally entail closing the socket connection.
     */
-  override def close(within: Duration): Unit = ???
+  override def close(within: Duration): Unit = drainSession(within)
 
   ///////////////////////////////////////////
 

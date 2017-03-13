@@ -15,8 +15,12 @@ trait Http2Connection {
   /** Get the current state of the session */
   def state: ConnectionState
 
-  /** Signal that the session should shutdown within the grace period */
-  def drainSession(gracePeriod: Duration, cause: Throwable): Unit
+  /** Signal that the session should shutdown within the grace period
+    *
+    * Only the first invocation is guaranteed to run, and the behavior of further
+    * invocations result in implementation specific behavior.
+    */
+  def drainSession(gracePeriod: Duration): Unit
 
   /** Ping the peer, asynchronously returning the duration of the round trip
     *

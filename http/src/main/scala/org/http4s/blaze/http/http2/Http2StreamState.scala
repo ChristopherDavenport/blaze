@@ -23,7 +23,7 @@ private abstract class Http2StreamState(
   // Can potentially be lazy, such as in an outbound stream
   def flowWindow: StreamFlowWindow
 
-  // deal with stream related errors
+  /** Deals with stream related errors */
   protected def onStreamFinished(ex: Option[Http2Exception]): Unit
 
   protected def maxFrameSize: Int
@@ -51,12 +51,6 @@ private abstract class Http2StreamState(
   // Similar to the state of halfClosedRemote
   // peer can no longer send frames other than WINDOW_UPDATE, PRIORITY, and RST_STREAM
   private[this] var receivedEOS: Boolean = false
-
-  /** Perform shutdown due to a RST_STREAM frame
-    *
-    * Will close out any pending data operations with an EOF and call `onStreamFinished`
-    */
-  def streamReset(): Unit = closeWithError(None)
 
   override def readRequest(size: Int): Future[StreamMessage] = {
     val p = Promise[StreamMessage]
@@ -109,7 +103,6 @@ private abstract class Http2StreamState(
     *
     * @return number of flow bytes written
     */
-  // TODO: this should probably all be moved into the `WriteManager`
   def performStreamWrite(controller: WriteController): Unit = {
     // Nothing waiting to go out, so return fast
     if (writePromise == null) return
@@ -172,16 +165,16 @@ private abstract class Http2StreamState(
 
   ///////////////////// Inbound messages ///////////////////////////////
 
-  final def invokeInboundData(eos: Boolean, data: ByteBuffer, flow: Int): MaybeError = {
+  final def invokeInboundData(eos: Boolean, data: ByteBuffer, flowBytes: Int): MaybeError = {
     // https://tools.ietf.org/html/rfc7540#section-5.1 section 'closed'
     if (receivedEOS) {
       closeWithError(None) // the GOAWAY will be sent by the FrameHandler
       STREAM_CLOSED.goaway(s"Stream($streamId received DATA frame after EOS").toError
     } else if (streamIsClosed) {
       STREAM_CLOSED.rst(streamId).toError
-    } else if (flowWindow.inboundObserved(flow)) {
+    } else if (flowWindow.inboundObserved(flowBytes)) {
       receivedEOS = eos
-      val consumed = if (queueMessage(DataFrame(eos, data))) flow else flow - data.remaining()
+      val consumed = if (queueMessage(DataFrame(eos, data))) flowBytes else flowBytes - data.remaining()
       flowWindow.inboundConsumed(consumed)
       Continue
     }
@@ -206,25 +199,12 @@ private abstract class Http2StreamState(
     }
   }
 
-  // handle the inbound message.
-  // Returns `true` if the message was handled by a stream. Otherwise, it was queued and returns `false`.
-  private[this] def queueMessage(msg: StreamMessage): Boolean = {
-    if (pendingRead == null) {
-      pendingInboundMessages.offer(msg)
-      false
-    }
-    else {
-      pendingRead.trySuccess(msg)
-      pendingRead = null
-      true
-    }
-  }
-
   //////////////////////////////////////////////////////////////////////
 
   // Shuts down the stream and calls `onStreamFinished` with any potential errors.
   // WARNING: this must be called from within the session executor.
-  private[this] def closeWithError(t: Option[Throwable]): Unit = {
+  // TODO: should add a way to signal that we don't want to send the error to the peer
+  def closeWithError(t: Option[Throwable]): Unit = {
     if (!streamIsClosed) {
       streamIsClosed = true
       clearDataChannels(t match {
@@ -233,7 +213,7 @@ private abstract class Http2StreamState(
       })
 
       val http2Ex = t match {
-          // Gotta make sure both sides agree that this stream is closed
+        // Gotta make sure both sides agree that this stream is closed
         case None if !(sentEOS && receivedEOS) => Some (STREAM_CLOSED.rst(streamId))
         case None => None
         case Some(t: Http2Exception) => Some(t)
@@ -246,6 +226,19 @@ private abstract class Http2StreamState(
     }
   }
 
+  // handle the inbound message.
+  // Returns `true` if the message was handled by a stream. Otherwise, it was queued and returns `false`.
+  private[this] def queueMessage(msg: StreamMessage): Boolean = {
+    if (pendingRead == null) {
+      pendingInboundMessages.offer(msg)
+      false
+    } else {
+      pendingRead.trySuccess(msg)
+      pendingRead = null
+      true
+    }
+  }
+
   private[this] def clearDataChannels(ex: Throwable): Unit = {
     // Clear the read channel
     if (pendingRead == null) {
@@ -255,8 +248,7 @@ private abstract class Http2StreamState(
       }
 
       flowWindow.session.sessionInboundConsumed(pendingBytes)
-    }
-    else {
+    } else {
       val p = pendingRead
       pendingRead = null
       p.tryFailure(ex)

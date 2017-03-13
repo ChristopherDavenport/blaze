@@ -5,9 +5,7 @@ import java.nio.ByteBuffer
 import org.log4s.getLogger
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
-import scala.util.{Failure, Success}
 
 /** Gracefully coordinate writes
   *
@@ -16,13 +14,10 @@ import scala.util.{Failure, Success}
   * the session executor.
   *
   * @param highWaterMark number of bytes that will trigger a flush.
-  * @param sessionExecutor serial executor that belongs to the session.
   */
-private abstract class WriteController(highWaterMark: Int, sessionExecutor: ExecutionContext) {
+private abstract class WriteController(highWaterMark: Int) {
 
   final protected val logger = getLogger
-
-  // TODO: this should be on only one who needs to worry about the Encoder
 
   private[this] var inWriteCycle = false
   private[this] var pendingWrites = new ArrayBuffer[ByteBuffer](4)
@@ -31,7 +26,26 @@ private abstract class WriteController(highWaterMark: Int, sessionExecutor: Exec
   private[this] val interestedStreams = new java.util.ArrayDeque[WriteListener]
 
   /** Write the outbound data to the pipeline */
-  protected def writeToWire(data: Seq[ByteBuffer]): Future[Unit]
+  protected def writeToWire(data: Seq[ByteBuffer]): Unit
+
+  /** See if this `WriteController` is waiting for data to flush */
+  final def awaitingWriteFlush: Boolean = inWriteCycle
+
+  /** Determine if the this `WriteController` has any more potential writes queue
+    *
+    * @return True if data is queued or streams have registered interests, False otherwise.
+    */
+  final def pendingInterests: Boolean = !pendingWrites.isEmpty || !interestedStreams.isEmpty
+
+  /** Called when the previous write has completed successfully and the pipeline is read to write again */
+  def writeSuccessful(): Unit = {
+    println(s"Write was successful: $inWriteCycle")
+    assert(inWriteCycle)
+    if (pendingInterests) doWrite()
+    else {
+      inWriteCycle = false
+    }
+  }
 
   /** Queue data for the wire
     *
@@ -51,6 +65,12 @@ private abstract class WriteController(highWaterMark: Int, sessionExecutor: Exec
     maybeWrite()
   }
 
+  /** Register a listener to be invoked when the pipeline is ready to perform write operations */
+  final def registerWriteInterest(stream: WriteListener): Unit = {
+    interestedStreams.add(stream)
+    maybeWrite()
+  }
+
   private[this] def accBuffer(data: ByteBuffer): Unit = {
     if (data.hasRemaining) {
       pendingWrites += data
@@ -58,20 +78,15 @@ private abstract class WriteController(highWaterMark: Int, sessionExecutor: Exec
     }
   }
 
-  /** Register a listener to be invoked when the pipeline is ready to perform write operations */
-  final def registerWriteInterest(stream: WriteListener): Unit = {
-    interestedStreams.add(stream)
-    maybeWrite()
-  }
-
-  private[this] def pendingInterests: Boolean = !pendingWrites.isEmpty || !interestedStreams.isEmpty
-
   private[this] def maybeWrite(): Unit = {
     if (!inWriteCycle) doWrite()
   }
 
   // The meat and potatoes
   private[this] def doWrite(): Unit = {
+    println("Doing write")
+    // `inWriteCycle` needs to be set to `true` here so that when streams act
+    // on their write interests they don't induce another call to `doWrite`.
     inWriteCycle = true
 
     // Accumulate bytes until we run out of interests or have exceeded the high-water mark
@@ -90,18 +105,7 @@ private abstract class WriteController(highWaterMark: Int, sessionExecutor: Exec
       pendingWrites = new ArrayBuffer[ByteBuffer](out.length + 4)
       pendingWriteBytes = 0
 
-      writeToWire(out).onComplete {
-        case Success(_) =>
-          // See if we need to continue the loop or can terminate
-          if (pendingInterests) {
-            inWriteCycle = true
-            doWrite()
-          }
-          else {
-            inWriteCycle = false
-          }
-        case Failure(ex) => ???
-      }(sessionExecutor)
+      writeToWire(out)
     } else {
       // Didn't write anything, so the cycle is finished
       inWriteCycle = false
