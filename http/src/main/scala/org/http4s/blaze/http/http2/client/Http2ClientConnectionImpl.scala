@@ -63,10 +63,6 @@ private class Http2ClientConnectionImpl(
     }
   }
 
-  // TODO: this could be more interesting and is probably interesting for the server, too.
-  override def quality: Double =
-    1.0 - activeStreamCount.toDouble/peerSettings.maxInboundStreams.toDouble
-
   /** Close the session.
     *
     * This will generally entail closing the socket connection.

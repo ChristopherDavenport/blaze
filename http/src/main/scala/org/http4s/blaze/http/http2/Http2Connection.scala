@@ -15,6 +15,15 @@ trait Http2Connection {
   /** Get the current state of the session */
   def state: ConnectionState
 
+  /** An estimate for the current quality of the connection
+    *
+    * @see [[Http2ClientSession]]
+    *
+    * @return a number with domain [0, 1] signifying the health or quality of
+    *         the session. The scale is intended to be linear.
+    */
+  def quality: Double
+
   /** Signal that the session should shutdown within the grace period
     *
     * Only the first invocation is guaranteed to run, and the behavior of further
@@ -41,9 +50,21 @@ trait Http2ClientConnection extends Http2Connection with Http2ClientSession {
 
 object Http2Connection {
   sealed trait ConnectionState
+
+  /** The `Running` state represents a session that is active and able to accept
+    * new streams.
+    */
   case object Running extends ConnectionState
 
-  sealed trait Closing extends ConnectionState
-  case class Draining(deadline: Long, reason: Throwable) extends Closing
-  case class Closed(reason: Throwable) extends Closing
+  sealed trait Closing extends ConnectionState {
+    def reason: Option[Throwable]
+  }
+
+  /** The `Draining` state represents a session that is no longer accepting new
+    * streams and is in the process of draining existing connection.
+    */
+  case class Draining(deadline: Long, reason: Option[Throwable]) extends Closing
+
+  /** The `Closed` state represents a session that is completely shutdown. */
+  case class Closed(reason: Option[Throwable]) extends Closing
 }

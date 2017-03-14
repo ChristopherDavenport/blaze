@@ -79,10 +79,12 @@ private final class StreamIdManager private(
     */
   def takeOutboundId(): Option[Int] = {
     // Returns `None` if the stream id overflows, which is when a signed Int overflows
-    if (nextOutbound > 0) {
+    if (unusedOutboundStreams) {
       val result = Some(nextOutbound)
       nextOutbound += 2
       result
     } else None
   }
+
+  def unusedOutboundStreams: Boolean = nextOutbound > 0
 }

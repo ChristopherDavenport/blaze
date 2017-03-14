@@ -39,14 +39,12 @@ private abstract class Http2ConnectionImpl(
 
   private[this] def isClosing: Boolean = state.isInstanceOf[Closing]
 
-  private[this] def isDraining: Boolean = state.isInstanceOf[Draining]
-
   // The sessionExecutor is responsible for serializing all mutations of the session state,
   // to include its interactions with the socket.
   private[this] implicit val sessionExecutor = new SerialExecutionContext(executor) {
     override def reportFailure(cause: Throwable): Unit = {
       // Any uncaught exceptions in the serial executor are fatal to the session
-      sessionExecutor_shutdownWithError(cause, "sessionExecutor")
+      sessionExecutor_shutdownWithError(Some(cause), "sessionExecutor")
     }
   }
 
@@ -75,6 +73,11 @@ private abstract class Http2ConnectionImpl(
     readLoop(BufferTools.emptyBuffer)
   }
 
+  override def quality: Double = {
+    if (isClosing || !idManager.unusedOutboundStreams) 0.0
+    else 1.0 - activeStreamCount.toDouble/peerSettings.maxInboundStreams.toDouble
+  }
+
   override def ping: Future[Duration] = {
     val p = Promise[Duration]
     sessionExecutor.execute(new Runnable {
@@ -95,7 +98,7 @@ private abstract class Http2ConnectionImpl(
       writeController.writeOutboundData(pingFrame)
   }
 
-  def drainSession(gracePeriod: Duration): Unit = {
+  override def drainSession(gracePeriod: Duration): Unit = {
     require(gracePeriod.isFinite())
     sessionExecutor.execute(new Runnable {
       override def run(): Unit = sessionExecutor_drainSession(gracePeriod)
@@ -108,20 +111,19 @@ private abstract class Http2ConnectionImpl(
     state match {
       case Closed(_) => () // nop already under control
       case Draining(d, _) if d < deadline => ()
-
-      case _ if gracePeriod.length == 0 => // close now
-        sessionExecutor_shutdownWithError(Http2Exception.NO_ERROR.goaway(), "drainSession-now")
-
       case _ =>
         // Start draining: send a GOAWAY and set a timer to shutdown
         val noError = Http2Exception.NO_ERROR.goaway()
-        currentState = Http2Connection.Draining(deadline, noError)
+        val someNoError = Some(noError)
+        currentState = Http2Connection.Draining(deadline, someNoError)
 
         val frame = Http20FrameSerializer.mkGoAwayFrame(idManager.lastInboundStream, noError)
         writeController.writeOutboundData(frame)
 
         // Set a timer to force closed the session after the expiration
-        val work = new Runnable { def run(): Unit = sessionExecutor_shutdownWithError(noError, "drainSession") }
+        val work = new Runnable {
+          def run(): Unit = sessionExecutor_shutdownWithError(someNoError, s"drainSession($gracePeriod)")
+        }
         Execution.scheduler.schedule(work, sessionExecutor, gracePeriod)
     }
   }
@@ -142,7 +144,7 @@ private abstract class Http2ConnectionImpl(
   /** Get the current state of the `Session` */
   final def state: ConnectionState = currentState
 
-  private object sessionFlowControl extends SessionFlowControl(mySettings, peerSettings) {
+  private[this] val sessionFlowControl = new SessionFlowControl(mySettings, peerSettings) {
     override protected def onSessonBytesConsumed(consumed: Int): Unit = {
       val update = flowStrategy.checkSession(this)
       if (update > 0) {
@@ -173,20 +175,29 @@ private abstract class Http2ConnectionImpl(
   // This must be instantiated last since it has a dependency of `activeStreams` and `idManager`.
   private[this] val http2Decoder = newHttp2Decoder(new SessionFrameHandlerImpl)
 
-  private[this] val writeController = new WriteController(64*1024) { self =>
+  // TODO: thread the write buffer size in as a parameter
+  private[this] val writeController = new WriteController(64*1024) {
     /** Write the outbound data to the pipeline */
     override protected def writeToWire(data: Seq[ByteBuffer]): Unit = {
       writeBytes(data).onComplete {
         case Success(_) =>
+          // Finish the write cycle, and then see if we need to shutdown the connection.
+          // If the connection state is already `Closed`, it means we were flushing a
+          // GOAWAY and its our responsibility to signal that the session is now closed.
           writeSuccessful()
-
           currentState match {
             case Draining(_, ex) if !awaitingWriteFlush && activeStreams.isEmpty =>
               sessionExecutor_shutdownWithError(ex, "writeController.finish draining")
+
+            case Closed(_) if !awaitingWriteFlush =>
+              sessionTerminated()
+
             case _ => ()
           }
 
-        case Failure(t) => sessionExecutor_shutdownWithError(t, "writeToWire")
+        case Failure(t) =>
+          if (state.isInstanceOf[Closed]) sessionTerminated()
+          else sessionExecutor_shutdownWithError(Some(t), "writeToWire")
       }
     }
   }
@@ -285,13 +296,11 @@ private abstract class Http2ConnectionImpl(
         stream.closeWithError(Some(ex))
       }
 
-      val ex = Http2Exception.errorGenerator(errorCode.toInt).goaway(message)
-
       if (activeStreams.isEmpty) {
-        sessionExecutor_shutdownWithError(ex, "onGoAwayFrame")
+        sessionExecutor_shutdownWithError(None, "onGoAwayFrame")
       } else {
         // Need to wait for the streams to close down
-        currentState = Draining(Long.MaxValue, ex)
+        currentState = Draining(Long.MaxValue, None)
       }
 
       Continue
@@ -305,52 +314,52 @@ private abstract class Http2ConnectionImpl(
     readData().onComplete {
       // This completion is run in the sessionExecutor so its safe to
       // mutate the state of the session.
-      case Failure(ex) => sessionExecutor_shutdownWithError(ex, "readLoop-read")
+      case Failure(ex) => sessionExecutor_shutdownWithError(Some(ex), "readLoop-read")
       case Success(next) =>
         logger.debug(s"Read data: $next")
-        // TODO: this should be split into Success and Failure branches
         val data = BufferTools.concatBuffers(remainder, next)
 
         logger.debug("Handling inbound data.")
         @tailrec
         def go(): Unit = http2Decoder.decodeBuffer(data) match {
-          case Halt => // nop
+          case Halt => () // nop
           case Continue => go()
           case BufferUnderflow => readLoop(data)
-            // TODO: we need to handle this error, not just log it.
-          case Error(ex) =>
-            sessionExecutor_shutdownWithError(ex, "readLoop-decode")
+          case Error(ex) => sessionExecutor_shutdownWithError(Some(ex), "readLoop-decode")
         }
         go()
     }
 
   // Must be called from within the session executor
-  private[this] def sessionExecutor_shutdownWithError(ex: Throwable, phase: String): Unit = {
+  private[this] def sessionExecutor_shutdownWithError(ex: Option[Throwable], phase: String): Unit = {
     // This should be the only way to set the state to `Closed`, making this idempotent
     if (!currentState.isInstanceOf[Closed]) {
       // TODO: make sure things like EOF are filtered out
-      val sessionEx = ex match {
-        case ex: Http2Exception =>
-          logger.debug(ex)(s"Shutting down with HTTP/2 session in phase $phase")
-          ex
-
-        case other =>
-          logger.warn(other)(s"Shutting down HTTP/2 with unhandled exception in phase $phase")
-          Http2Exception.INTERNAL_ERROR.goaway("Unhandled internal exception")
-      }
 
       currentState = Closed(ex)
+      ex match {
+        case None => sessionTerminated()  // If we're not writing any more data, we need to terminate the session
+        case Some(ex) =>
+          val http2SessionError = ex match {
+            case ex: Http2Exception =>
+              logger.debug(ex)(s"Shutting down with HTTP/2 session in phase $phase")
+              ex
 
-      val streams = activeStreams.values.toVector
-      for (stream <- streams) {
-        activeStreams.remove(stream.streamId)
-        stream.closeWithError(Some(ex))
+            case other =>
+              logger.warn(other)(s"Shutting down HTTP/2 with unhandled exception in phase $phase")
+              Http2Exception.INTERNAL_ERROR.goaway("Unhandled internal exception")
+          }
+
+          val streams = activeStreams.values.toVector
+          for (stream <- streams) {
+            activeStreams.remove(stream.streamId)
+            stream.closeWithError(Some(ex))
+          }
+
+          val goawayFrame = Http20FrameSerializer.mkGoAwayFrame(idManager.lastInboundStream, http2SessionError)
+
+          writeController.writeOutboundData(goawayFrame)
       }
-
-      val goawayFrame = Http20FrameSerializer.mkGoAwayFrame(idManager.lastInboundStream, sessionEx)
-      writeBytes(goawayFrame).onComplete {
-        case _ => sessionTerminated()
-      }(Execution.directec)
     }
   }
 
@@ -372,12 +381,12 @@ private abstract class Http2ConnectionImpl(
           writeController.writeOutboundData(rstFrame)
 
         case Some(ex: Http2SessionException) =>
-          sessionExecutor_shutdownWithError(ex, "onStreamFinished")
+          sessionExecutor_shutdownWithError(Some(ex), "onStreamFinished")
       }
 
       // Check to see if we were draining and have finished, and if so, are all the streams closed.
       currentState match {
-        case Draining(_, ex) if activeStreams.isEmpty && !writeController.pendingInterests =>
+        case Draining(_, ex) if activeStreams.isEmpty && !writeController.awaitingWriteFlush =>
           sessionExecutor_shutdownWithError(ex, "onStreamFinished")
 
         case _ => ()
@@ -412,7 +421,6 @@ private abstract class Http2ConnectionImpl(
 
     // We need to establish whether the stream has been initialized yet and try to acquire a new ID if not
     override protected def invokeStreamWrite(msg: StreamMessage, p: Promise[Unit]): Unit = {
-      println(s"Stream($lazyStreamId) performing write")
       if (lazyStreamId != -1) super.invokeStreamWrite(msg, p)
       else if (state.isInstanceOf[Closing]) {
         // Before we initialized the stream, we began to drain or were closed.

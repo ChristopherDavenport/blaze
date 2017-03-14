@@ -23,6 +23,7 @@ private abstract class WriteController(highWaterMark: Int) {
   private[this] var pendingWrites = new ArrayBuffer[ByteBuffer](4)
   private[this] var pendingWriteBytes: Int = 0
 
+  // TODO: if we implement priorities, we should prioritize writes as well.
   private[this] val interestedStreams = new java.util.ArrayDeque[WriteListener]
 
   /** Write the outbound data to the pipeline */
@@ -31,15 +32,10 @@ private abstract class WriteController(highWaterMark: Int) {
   /** See if this `WriteController` is waiting for data to flush */
   final def awaitingWriteFlush: Boolean = inWriteCycle
 
-  /** Determine if the this `WriteController` has any more potential writes queue
-    *
-    * @return True if data is queued or streams have registered interests, False otherwise.
-    */
-  final def pendingInterests: Boolean = !pendingWrites.isEmpty || !interestedStreams.isEmpty
+  private[this] def pendingInterests: Boolean = !pendingWrites.isEmpty || !interestedStreams.isEmpty
 
   /** Called when the previous write has completed successfully and the pipeline is read to write again */
   def writeSuccessful(): Unit = {
-    println(s"Write was successful: $inWriteCycle")
     assert(inWriteCycle)
     if (pendingInterests) doWrite()
     else {
@@ -84,7 +80,6 @@ private abstract class WriteController(highWaterMark: Int) {
 
   // The meat and potatoes
   private[this] def doWrite(): Unit = {
-    println("Doing write")
     // `inWriteCycle` needs to be set to `true` here so that when streams act
     // on their write interests they don't induce another call to `doWrite`.
     inWriteCycle = true
