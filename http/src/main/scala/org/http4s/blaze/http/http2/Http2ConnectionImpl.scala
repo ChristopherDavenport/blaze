@@ -206,23 +206,13 @@ private abstract class Http2ConnectionImpl(
   private class SessionFrameHandlerImpl extends SessionFrameHandler[Http2StreamStateBase](
     mySettings, headerDecoder, activeStreams, sessionFlowControl, idManager) {
 
+    protected val logger = Http2ConnectionImpl.this.logger
+
     override protected def handlePushPromise(streamId: Int, promisedId: Int, headers: Headers): Http2Result = {
       // TODO: support push promises
       val frame = Http20FrameSerializer.mkRstStreamFrame(promisedId, Http2Exception.REFUSED_STREAM.code)
       writeController.writeOutboundData(frame)
       Continue
-    }
-
-    override def onSessionFlowUpdate(count: Int): Unit = {
-      logger.debug(s"Session flow update: $count")
-      // We need to check the streams to see if any can now make forward progress
-      activeStreams.values.foreach(_.performStreamWrite(writeController))
-    }
-
-    override def onStreamFlowUpdate(stream: Http2StreamStateBase, count: Int): Unit = {
-      logger.debug(s"Stream(${stream.streamId}) flow update: $count")
-      // We can now check this stream to see if it can make forward progress
-      stream.performStreamWrite(writeController)
     }
 
     override def onPingFrame(ack: Boolean, data: Array[Byte]): Http2Result = {

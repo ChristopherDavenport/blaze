@@ -136,7 +136,7 @@ abstract class SessionFlowControl(
       }
     }
 
-    override def outboundReceived(request: Int): Int = {
+    override def outboundRequest(request: Int): Int = {
       require(request >= 0)
 
       val withdrawal = math.min(sessionOutboundWindow, math.min(request, outboundWindow))

@@ -15,7 +15,7 @@ import scala.util.control.NonFatal
   *
   * @param highWaterMark number of bytes that will trigger a flush.
   */
-private abstract class WriteController(highWaterMark: Int) {
+private abstract class WriteController(highWaterMark: Int) extends WriteListener {
 
   final protected val logger = getLogger
 
@@ -24,7 +24,7 @@ private abstract class WriteController(highWaterMark: Int) {
   private[this] var pendingWriteBytes: Int = 0
 
   // TODO: if we implement priorities, we should prioritize writes as well.
-  private[this] val interestedStreams = new java.util.ArrayDeque[WriteListener]
+  private[this] val interestedStreams = new java.util.ArrayDeque[WriteInterest]
 
   /** Write the outbound data to the pipeline */
   protected def writeToWire(data: Seq[ByteBuffer]): Unit
@@ -62,7 +62,7 @@ private abstract class WriteController(highWaterMark: Int) {
   }
 
   /** Register a listener to be invoked when the pipeline is ready to perform write operations */
-  final def registerWriteInterest(stream: WriteListener): Unit = {
+  final def registerWriteInterest(stream: WriteInterest): Unit = {
     interestedStreams.add(stream)
     maybeWrite()
   }
@@ -87,7 +87,8 @@ private abstract class WriteController(highWaterMark: Int) {
     // Accumulate bytes until we run out of interests or have exceeded the high-water mark
     while(!interestedStreams.isEmpty && pendingWriteBytes < highWaterMark) {
       try {
-        interestedStreams.poll().performStreamWrite(this)
+        val data = interestedStreams.poll().performStreamWrite()
+        writeOutboundData(data)
       } catch { case NonFatal(t) =>
         logger.error(t)(s"Unhandled exception performing stream write operation")
       }

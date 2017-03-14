@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import org.http4s.blaze.http._
 import org.http4s.blaze.http.http2.Http2Exception._
+import org.log4s.Logger
 
 import scala.collection.mutable.Map
 
@@ -20,21 +21,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     idManager: StreamIdManager)
   extends HeaderAggregatingFrameHandler(mySettings, headerDecoder) {
 
-  /** Called when a session window update has occurred to allow the session to attempt
-    * forward progress on any streams that may have been blocked for flow control reasons.
-    *
-    * @note if the flow control state is updated before this method is called, so if this
-    *       method throws an `Exception`, the state has still been mutated.
-    */
-  def onSessionFlowUpdate(count: Int): Unit
-
-  /** Called when a stream window update has occurred to allow the session to attempt
-    * forward progress on the stream that may have been blocked for flow control reasons.
-    *
-    * @note if the flow control state is updated before this method is called, so if this
-    *       method throws an `Exception`, the state has still been mutated.
-    */
-  def onStreamFlowUpdate(stream: StreamState, count: Int): Unit
+  protected val logger: Logger
 
   /** Optionally create and initialize a new inbound stream
     *
@@ -135,5 +122,17 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
         }
         result
     }
+  }
+
+  private[this] def onSessionFlowUpdate(count: Int): Unit = {
+    logger.debug(s"Session flow update: $count")
+    // We need to check the streams to see if any can now make forward progress
+    activeStreams.values.foreach(_.outboundFlowAcked())
+  }
+
+  private[this] def onStreamFlowUpdate(stream: StreamState, count: Int): Unit = {
+    logger.debug(s"Stream(${stream.streamId}) flow update: $count")
+    // We can now check this stream to see if it can make forward progress
+    stream.outboundFlowAcked()
   }
 }

@@ -23,7 +23,7 @@ trait StreamFlowWindow {
     * @param request maximum bytes to withdraw
     * @return actual bytes withdrawn from the window
     */
-  def outboundReceived(request: Int): Int
+  def outboundRequest(request: Int): Int
 
   /** Get the remaining bytes in the streams inbound window */
   def inboundWindow: Int

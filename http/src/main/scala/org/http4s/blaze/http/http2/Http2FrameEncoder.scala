@@ -54,7 +54,9 @@ final class Http2FrameEncoder(
     val maxHeadersHeaderSize = 5 // priority(4) + weight(1), padding = 0
     val limit = maxFrameSize
 
-    if (rawHeaders.remaining() + maxHeadersHeaderSize > limit) {
+    if (rawHeaders.remaining() + maxHeadersHeaderSize <= limit) {
+      Http20FrameSerializer.mkHeaderFrame(streamId, rawHeaders, priority, true /*END_HEADERS */, eos, 0 /*padding*/)
+    } else {
       // need to fragment
       val acc = new VectorBuilder[ByteBuffer]
 
@@ -68,9 +70,6 @@ final class Http2FrameEncoder(
         acc ++= Http20FrameSerializer.mkContinuationFrame(streamId, endHeaders, continueBuf)
       }
       acc.result()
-    } else {
-
-      Http20FrameSerializer.mkHeaderFrame(streamId, rawHeaders, priority, true /*END_HEADERS */, eos, 0 /*padding*/)
     }
   }
 }

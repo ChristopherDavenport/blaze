@@ -256,7 +256,7 @@ class SessionFlowControlSpec extends Specification {
       val session = flowControl()
       val flow = session.newStreamFlowWindow(1)
 
-      flow.outboundReceived(0) must_== 0
+      flow.outboundRequest(0) must_== 0
       flow.outboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE
       session.sessionOutboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE
     }
@@ -265,7 +265,7 @@ class SessionFlowControlSpec extends Specification {
       val session = flowControl()
       val flow = session.newStreamFlowWindow(1)
 
-      flow.outboundReceived(DefaultSettings.INITIAL_WINDOW_SIZE) must_== DefaultSettings.INITIAL_WINDOW_SIZE
+      flow.outboundRequest(DefaultSettings.INITIAL_WINDOW_SIZE) must_== DefaultSettings.INITIAL_WINDOW_SIZE
       flow.outboundWindow must_== 0
       session.sessionOutboundWindow must_== 0
     }
@@ -274,7 +274,7 @@ class SessionFlowControlSpec extends Specification {
       val session = flowControl()
       val flow = session.newStreamFlowWindow(1)
 
-      flow.outboundReceived(DefaultSettings.INITIAL_WINDOW_SIZE + 1) must_== DefaultSettings.INITIAL_WINDOW_SIZE
+      flow.outboundRequest(DefaultSettings.INITIAL_WINDOW_SIZE + 1) must_== DefaultSettings.INITIAL_WINDOW_SIZE
       flow.outboundWindow must_== 0
       session.sessionOutboundWindow must_== 0
     }
@@ -285,7 +285,7 @@ class SessionFlowControlSpec extends Specification {
       val session = flowControl(config, config)
       val flow = session.newStreamFlowWindow(1)
 
-      flow.outboundReceived(10) must_== 1
+      flow.outboundRequest(10) must_== 1
       flow.outboundWindow must_== 0
       session.sessionOutboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE - 1
     }
@@ -295,12 +295,12 @@ class SessionFlowControlSpec extends Specification {
       val flow1 = session.newStreamFlowWindow(1)
       val flow2 = session.newStreamFlowWindow(2)
 
-      flow1.outboundReceived(10) must_== 10
+      flow1.outboundRequest(10) must_== 10
       flow1.outboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE - 10
       flow2.outboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE
       session.sessionOutboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE - 10
 
-      flow2.outboundReceived(20) must_== 20
+      flow2.outboundRequest(20) must_== 20
       flow2.outboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE - 20
       flow1.outboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE - 10
       session.sessionOutboundWindow must_== DefaultSettings.INITIAL_WINDOW_SIZE - 30

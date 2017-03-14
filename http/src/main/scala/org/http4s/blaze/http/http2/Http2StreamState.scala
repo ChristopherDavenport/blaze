@@ -12,10 +12,10 @@ import org.http4s.blaze.util.{BufferTools, SerialExecutionContext}
 import scala.concurrent.{Future, Promise}
 
 private abstract class Http2StreamState(
-    writeController: WriteController,
+    writeListener: WriteListener,
     http2FrameEncoder: Http2FrameEncoder,
     sessionExecutor: SerialExecutionContext)
-  extends HeadStage[StreamMessage] with WriteListener {
+  extends HeadStage[StreamMessage] with WriteInterest {
 
   // Can potentially be lazy, such as in an outbound stream
   def streamId: Int
@@ -95,51 +95,57 @@ private abstract class Http2StreamState(
       sentEOS = msg.endStream
       pendingOutboundFrame = msg
       writePromise = p
-      writeController.registerWriteInterest(this)
+      writeListener.registerWriteInterest(this)
     }
+  }
+
+  /** Called when the outbound flow window of the session or this stream has had some data
+    * acked and we may now be able to make forward progress.
+    */
+  def outboundFlowAcked(): Unit = {
+    // TODO: we may already be registered. Maybe keep track of that state?
+    if (writePromise != null) writeListener.registerWriteInterest(this)
   }
 
   /** Must be called by the [[WriteController]] from within the session executor
     *
     * @return number of flow bytes written
     */
-  def performStreamWrite(controller: WriteController): Unit = {
+  def performStreamWrite(): Seq[ByteBuffer] = {
     // Nothing waiting to go out, so return fast
-    if (writePromise == null) return
+    if (writePromise == null) return Nil
 
     pendingOutboundFrame match {
       case HeadersFrame(priority, eos, hs) =>
         val data = http2FrameEncoder.headerFrame(streamId, hs, priority, eos)
-        controller.writeOutboundData(data)
         writePromise.trySuccess(())
         pendingOutboundFrame = null
         writePromise = null
+        data
 
       case DataFrame(eos, data) =>
         val requested = math.min(maxFrameSize, data.remaining)
-        val allowedBytes = flowWindow.outboundReceived(requested)
+        val allowedBytes = flowWindow.outboundRequest(requested)
 
         logger.debug(s"Allowed: $allowedBytes, data: $pendingOutboundFrame")
 
         if (allowedBytes == pendingOutboundFrame.flowBytes) {
           val buffers = http2FrameEncoder.dataFrame(streamId, data, eos)
-          writeController.writeOutboundData(buffers)
-
-          // There isn't a race here since all manipulations of the vars are from within the actor
           pendingOutboundFrame = null
           writePromise.trySuccess(())
           writePromise = null
+          buffers
         } else {
           // We take a chunk, and then reregister ourselves
           val slice = BufferTools.takeSlice(data, allowedBytes)
           val buffers = http2FrameEncoder.dataFrame(streamId, slice, false)
-          writeController.writeOutboundData(buffers)
 
-          if (allowedBytes == maxFrameSize) {
-            // We were (probably) not limited by the flow window so
-            // signal interest in another write cycle.
-            writeController.registerWriteInterest(this)
+          if (flowWindow.outboundWindow > 0) {
+            // We were not limited by the flow window so signal interest in another write cycle.
+            writeListener.registerWriteInterest(this)
           }
+
+          buffers
         }
     }
   }
