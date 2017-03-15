@@ -11,12 +11,12 @@ import scala.collection.mutable.Map
 /** Receives frames from the `Http20FrameDecoder`
   *
   * Concurrency is not controlled by this type; it is expected that thread safety
-  * will be managed by the [[Http2SessionImpl]].
+  * will be managed by the [[Http2ConnectionImpl]].
   */
 private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     mySettings: Http2Settings,
     headerDecoder: HeaderDecoder,
-    activeStreams: Map[Int, StreamState], // This could be replaced with a method
+    activeStreams: Map[Int, StreamState],
     sessionFlowControl: SessionFlowControl,
     idManager: StreamIdManager)
   extends HeaderAggregatingFrameHandler(mySettings, headerDecoder) {
@@ -43,23 +43,30 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     activeStreams.get(streamId) match {
       case Some(stream) => stream.invokeInboundHeaders(priority, endStream, headers)
       case None =>
-        if (idManager.observeInboundId(streamId)) {
+        if (streamId == 0) {
+          PROTOCOL_ERROR.goaway(s"Illegal stream ID for headers frame: 0").toError
+        } else if (idManager.observeInboundId(streamId)) {
           newInboundStream(streamId) match {
             case Some(head) => head.invokeInboundHeaders(priority, endStream, headers)
             case None =>  // stream rejected
               REFUSED_STREAM.rst(streamId).toError
           }
-
+        } else if (idManager.isIdleOutboundId(streamId)) {
+          PROTOCOL_ERROR.goaway(s"Received HEADERS from on idle outbound stream id $streamId").toError
         } else {
           STREAM_CLOSED.rst(streamId).toError
         }
     }
   }
 
-  // See https://tools.ietf.org/html/rfc7540#section-6.6 for the list of rules
+  // See https://tools.ietf.org/html/rfc7540#section-6.6 and section-8.2 for the list of rules
   override def onCompletePushPromiseFrame(streamId: Int, promisedId: Int, headers: Headers): Http2Result = {
-    if (!mySettings.pushEnabled)
+    if (!idManager.isClient)
+      PROTOCOL_ERROR.goaway(s"Server received PUSH_PROMISE frame for stream $streamId").toError
+    else if (!mySettings.pushEnabled)
       PROTOCOL_ERROR.goaway("Received PUSH_PROMISE frame then they are disallowed").toError
+    else if (idManager.isIdleOutboundId(streamId))
+      PROTOCOL_ERROR.goaway(s"Received PUSH_PROMISE for associated to an idle stream ($streamId)").toError
     else if (!idManager.isInboundId(promisedId))
       PROTOCOL_ERROR.goaway(s"Received PUSH_PROMISE frame with illegal stream id: $promisedId").toError
     else if (!idManager.observeInboundId(promisedId))

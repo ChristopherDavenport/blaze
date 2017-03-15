@@ -7,14 +7,14 @@ import org.http4s.blaze.http.http2.Http2Exception._
 import org.http4s.blaze.pipeline.Command
 import org.http4s.blaze.pipeline.Command.{EOF, OutboundCommand}
 import org.http4s.blaze.pipeline.HeadStage
-import org.http4s.blaze.util.{BufferTools, SerialExecutionContext}
+import org.http4s.blaze.util.BufferTools
 
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 private abstract class Http2StreamState(
     writeListener: WriteListener,
     http2FrameEncoder: Http2FrameEncoder,
-    sessionExecutor: SerialExecutionContext)
+    sessionExecutor: ExecutionContext)
   extends HeadStage[StreamMessage] with WriteInterest {
 
   // Can potentially be lazy, such as in an outbound stream

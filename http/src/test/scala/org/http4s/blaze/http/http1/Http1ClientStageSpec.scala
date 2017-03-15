@@ -1,4 +1,4 @@
-package org.http4s.blaze.http.http1x
+package org.http4s.blaze.http.http1
 
 import org.specs2.mutable.Specification
 

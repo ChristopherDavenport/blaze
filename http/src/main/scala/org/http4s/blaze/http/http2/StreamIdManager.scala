@@ -18,12 +18,15 @@ private object StreamIdManager {
 
 /** Tool for tracking stream ids */
 private final class StreamIdManager private(
-    isClient: Boolean,
+    val isClient: Boolean,
     private var nextInbound: Int,
     private var nextOutbound: Int) {
 
   /** Get the last inbound stream to be observed, or 0 if no streams have been processed */
   def lastInboundStream: Int = math.max(0, nextInbound - 2)
+
+  /** Get the last outbound stream to be observed, or 0 if no streams have been initiated */
+  def lastOutboundStream: Int = math.max(0, nextOutbound - 2)
 
   /** Determine if the stream id is an inbound stream id */
   def isInboundId(id: Int): Boolean = {
