@@ -206,8 +206,6 @@ private abstract class Http2ConnectionImpl(
   private class SessionFrameHandlerImpl extends SessionFrameHandler[Http2StreamStateBase](
     mySettings, headerDecoder, activeStreams, sessionFlowControl, idManager) {
 
-    protected val logger = Http2ConnectionImpl.this.logger
-
     override protected def handlePushPromise(streamId: Int, promisedId: Int, headers: Headers): Http2Result = {
       // TODO: support push promises
       val frame = Http20FrameSerializer.mkRstStreamFrame(promisedId, Http2Exception.REFUSED_STREAM.code)

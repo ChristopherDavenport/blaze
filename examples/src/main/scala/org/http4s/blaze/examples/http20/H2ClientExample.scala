@@ -59,19 +59,28 @@ object H2ClientExample {
     }
   }
 
+  def callLocalhost(tag: Int): Future[String] = {
+    Http2Client.defaultH2Client.GET("https://localhost:8443/bigstring") { resp =>
+      resp.body.accumulate().map { bytes =>
+        println(s"Finished response $tag of size ${bytes.remaining()}")
+        StandardCharsets.UTF_8.decode(bytes).toString
+      }
+    }
+  }
+
   def main(args: Array[String]): Unit = {
     println("Hello, world!")
 
-    val r1 = Await.result(callTwitter(-1), 5.seconds)
+    val r1 = Await.result(callLocalhost(-1), 5.seconds)
 
-    val fresps = (0 until 99).map { i =>
-      callTwitter(i).map(i -> _)
+    val fresps = (0 until 1000).map { i =>
+      callLocalhost(i).map(i -> _.length)
     }
 
     val resps = Await.result(Future.sequence(fresps), 50.seconds)
 
-    val chars = resps.foldLeft(0){ (acc, r) =>
-      acc + r._2.length
+    val chars = resps.foldLeft(0){ case (acc, (i, len)) =>
+      acc + len
     }
 
     println(s"The total body length of ${resps.length} messages: $chars")

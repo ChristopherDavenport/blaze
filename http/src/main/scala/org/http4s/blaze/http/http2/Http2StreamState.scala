@@ -135,8 +135,12 @@ private abstract class Http2StreamState(
           writePromise.trySuccess(())
           writePromise = null
           buffers
+        } else if (allowedBytes == 0) {
+          // Can't make progress, must wait for flow update to proceed.
+          // Note: this case must be second since a DataFrame with 0 bytes can be used to signal EOS
+          Nil
         } else {
-          // We take a chunk, and then reregister ourselves
+          // We take a chunk, and then reregister ourselves with the listener
           val slice = BufferTools.takeSlice(data, allowedBytes)
           val buffers = http2FrameEncoder.dataFrame(streamId, slice, false)
 
@@ -223,6 +227,7 @@ private abstract class Http2StreamState(
         case None if !(sentEOS && receivedEOS) => Some (STREAM_CLOSED.rst(streamId))
         case None => None
         case Some(t: Http2Exception) => Some(t)
+        case Some(EOF) => None
         case Some(other) =>
           logger.warn(other)(s"Unknown error in stream($streamId)")
           Some(INTERNAL_ERROR.rst(streamId, "Unhandled error in stream pipeline"))

@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import org.http4s.blaze.http._
 import org.http4s.blaze.http.http2.Http2Exception._
-import org.log4s.Logger
+import org.log4s.getLogger
 
 import scala.collection.mutable.Map
 
@@ -21,7 +21,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
     idManager: StreamIdManager)
   extends HeaderAggregatingFrameHandler(mySettings, headerDecoder) {
 
-  protected val logger: Logger
+  private[this] val logger = getLogger
 
   /** Optionally create and initialize a new inbound stream
     *
