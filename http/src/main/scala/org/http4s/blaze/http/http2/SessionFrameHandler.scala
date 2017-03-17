@@ -82,7 +82,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
         if (!sessionFlowControl.sessionInboundObserved(flow)) {
           val msg = s"data frame for inactive stream (id $streamId) overflowed session flow window. Size: $flow."
           FLOW_CONTROL_ERROR.goaway(msg).toError
-        } else if (idManager.isIdleInboundId(streamId)) {
+        } else if (idManager.isIdleId(streamId)) {
           PROTOCOL_ERROR.goaway(s"DATA on uninitialized stream ($streamId)").toError
         } else {
           // Message for a closed stream: Send a RST_STREAM
@@ -96,7 +96,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
 
   // https://tools.ietf.org/html/rfc7540#section-6.4
   override def onRstStreamFrame(streamId: Int, code: Int): Http2Result = {
-    if (idManager.isIdleOutboundId(streamId) || idManager.isIdleInboundId(streamId))
+    if (idManager.isIdleId(streamId))
       PROTOCOL_ERROR.goaway(s"RST_STREAM for idle stream id $streamId").toError
     else {
       // We remove it from the active streams first so that we don't send our own RST_STREAM
@@ -117,7 +117,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
       }
       result
     }
-    else if (idManager.isIdleInboundId(streamId) || idManager.isIdleOutboundId(streamId)) {
+    else if (idManager.isIdleId(streamId)) {
       PROTOCOL_ERROR.goaway(s"WINDOW_UPDATE on uninitialized stream ($streamId)").toError
     }
     else activeStreams.get(streamId) match {

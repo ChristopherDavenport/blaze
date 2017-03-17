@@ -45,6 +45,11 @@ abstract class SessionFlowControl(
   /** Get the number of bytes remaining in the inbound flow window */
   final def sessionInboundWindow: Int = _sessionInboundWindow
 
+  /** Observe inbound bytes that don't belong to an active inbound stream
+    *
+    * @param count bytes observed
+    * @return `true` if there was sufficient session flow window remaining, `false` otherwise.
+    */
   final def sessionInboundObserved(count: Int): Boolean = {
     require(count >= 0)
 

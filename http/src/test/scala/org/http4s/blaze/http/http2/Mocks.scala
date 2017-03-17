@@ -28,17 +28,16 @@ private class MockWriteListener extends WriteListener {
   }
 }
 
-private class MockHttp2StreamState(writeListener: WriteListener, frameEncoder: Http2FrameEncoder, sessionExecutor: ExecutionContext)
-  extends Http2StreamState(writeListener, frameEncoder, sessionExecutor) {
+private class MockHttp2StreamState(
+    val streamId: Int, tools: Http2MockTools)
+  extends Http2StreamState(tools.writeListener, tools.frameEncoder, tools.sessionExecutor) {
 
-  override def streamId: Int = ???
-
-  override def flowWindow: StreamFlowWindow = ???
+  override val flowWindow: StreamFlowWindow = tools.flowControl.newStreamFlowWindow(streamId)
 
   /** Deals with stream related errors */
   override protected def onStreamFinished(ex: Option[Http2Exception]): Unit = ???
 
-  override protected def maxFrameSize: Int = ???
+  override protected def maxFrameSize: Int = tools.mySettings.maxFrameSize
 }
 
 private class Http2MockTools(isClient: Boolean) {
@@ -49,7 +48,7 @@ private class Http2MockTools(isClient: Boolean) {
 
   lazy val flowControl: MockFlowControl = new MockFlowControl(mySettings, peerSettings)
 
-  lazy val sessionExecutor: ExecutionContext = new SerialExecutionContext(Execution.directec)
+  lazy val sessionExecutor: ExecutionContext = Execution.trampoline
 
   lazy val headerEncoder: HeaderEncoder = new HeaderEncoder(peerSettings.headerTableSize)
 
@@ -57,7 +56,9 @@ private class Http2MockTools(isClient: Boolean) {
 
   lazy val frameEncoder: Http2FrameEncoder = new Http2FrameEncoder(peerSettings, headerEncoder)
 
-  lazy val newWriteListener: MockWriteListener = new MockWriteListener
+  lazy val writeListener: MockWriteListener = new MockWriteListener
 
   lazy val idManager: StreamIdManager = StreamIdManager(isClient)
+
+  def newStream(id: Int): MockHttp2StreamState = new MockHttp2StreamState(id, this)
 }

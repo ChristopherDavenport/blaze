@@ -35,14 +35,16 @@ private final class StreamIdManager private(
     id > 0 && (id % 2 == 0) == isClient
   }
 
+  /** Determine if the id corresponds to an idle stream */
+  def isIdleId(id: Int): Boolean =
+    isIdleInboundId(id) || isIdleOutboundId(id)
+
   /** Determine if the stream id is an outbound stream id */
-  def isOutboundId(id: Int): Boolean =
-    !isInboundId(id)
+  def isOutboundId(id: Int): Boolean = !isInboundId(id)
 
   /** Determine if the stream id is both an inbound id and is idle */
-  def isIdleInboundId(id: Int): Boolean = {
+  def isIdleInboundId(id: Int): Boolean =
     isInboundId(id) && id >= nextInbound
-  }
 
   /** Determine if the stream id is both an outbound id and is idle */
   def isIdleOutboundId(id: Int): Boolean = {
