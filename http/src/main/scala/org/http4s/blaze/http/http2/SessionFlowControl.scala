@@ -118,25 +118,30 @@ abstract class SessionFlowControl(
     private[this] var _streamOutboundWindow: Int = theirSettings.initialWindowSize
     private[this] var _streamUnconsumedInbound: Int = 0
 
-    override def session: SessionFlowControl = SessionFlowControl.this
+    override def sessionFlowControl: SessionFlowControl = SessionFlowControl.this
 
-    override def unconsumedBytes: Int = _streamUnconsumedInbound
+    override def streamUnconsumedBytes: Int = _streamUnconsumedInbound
 
-    override def outboundWindow: Int =  _streamOutboundWindow
+    override def streamOutboundWindow: Int = _streamOutboundWindow
 
-    // TODO: why is this returning a `MaybeError`? This feels like a real exception...
+    override def peerSettingsInitialWindowChange(delta: Int): MaybeError =
+      adjustOutbound(delta)
+
     override def outboundAcked(count: Int): MaybeError = {
       // Updates MUST be greater than 0, otherwise its protocol error
       // https://tools.ietf.org/html/rfc7540#section-6.9
       if (count <= 0)
         PROTOCOL_ERROR.goaway(s"Invalid stream ($streamId) WINDOW_UPDATE: size <= 0.").toError
+      else adjustOutbound(count)
+    }
+
+    private[this] def adjustOutbound(delta: Int): MaybeError = {
       // A sender MUST NOT allow a flow-control window to exceed 2^31-1 octets.
       // https://tools.ietf.org/html/rfc7540#section-6.9.1
-      else if (Int.MaxValue - sessionOutboundWindow < count)
+      if (Int.MaxValue - sessionOutboundWindow < delta)
         FLOW_CONTROL_ERROR.goaway(s"Flow control exceeded max window for stream $streamId.").toError
-
       else {
-        _streamOutboundWindow += count
+        _streamOutboundWindow += delta
         Continue
       }
     }
@@ -144,17 +149,17 @@ abstract class SessionFlowControl(
     override def outboundRequest(request: Int): Int = {
       require(request >= 0)
 
-      val withdrawal = math.min(sessionOutboundWindow, math.min(request, outboundWindow))
+      val withdrawal = math.min(sessionOutboundWindow, math.min(request, streamOutboundWindow))
       _sessionOutboundWindow -= withdrawal
       _streamOutboundWindow -= withdrawal
       withdrawal
     }
 
-    override def inboundWindow: Int =  _streamInboundWindow
+    override def streamInboundWindow: Int =  _streamInboundWindow
 
     override def inboundObserved(count: Int): Boolean = {
       require(count >= 0)
-      if (count > inboundWindow || count > sessionInboundWindow) false
+      if (count > streamInboundWindow || count > sessionInboundWindow) false
       else {
         _streamUnconsumedInbound += count
         _sessionUnconsumedInbound += count
@@ -167,7 +172,7 @@ abstract class SessionFlowControl(
     }
 
     override def inboundConsumed(count: Int): Unit = {
-      require(count >= 0 && count <= unconsumedBytes && count <= sessionUnconsumedBytes)
+      require(count >= 0 && count <= streamUnconsumedBytes && count <= sessionUnconsumedBytes)
 
       if (count > 0) {
         _streamUnconsumedInbound -= count

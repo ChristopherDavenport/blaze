@@ -10,7 +10,7 @@ private class DefaultFlowStrategy(mySettings: Http2Settings) extends FlowStrateg
 
   override def checkStream(session: SessionFlowControl, stream: StreamFlowWindow): Increment = {
     val sess = checkSession(session)
-    val stre = check(mySettings.initialWindowSize, stream.inboundWindow, stream.unconsumedBytes)
+    val stre = check(mySettings.initialWindowSize, stream.streamInboundWindow, stream.streamUnconsumedBytes)
     Increment(sess, stre)
   }
 

@@ -4,7 +4,7 @@ import scala.collection.mutable
 
 object Http2Settings {
 
-  type SettingValue = Long
+  type SettingValue = Int
 
   // TODO: We don't need the whole SettingKey here...
   final case class Setting(code: Int, value: SettingValue) {
@@ -33,20 +33,37 @@ object Http2Settings {
 
   private val settingsMap = new mutable.HashMap[Int, SettingKey]()
 
-  private def makeKey(id: Int, name: String): SettingKey = {
-    val k = SettingKey(id, name)
-    settingsMap += id -> k
+  private def makeKey(code: Int, name: String): SettingKey = {
+    val k = SettingKey(code, name)
+    settingsMap += code -> k
     k
+  }
+
+  /** Helper for extracting invalid settings
+    *
+    * @see https://tools.ietf.org/html/rfc7540#section-6.5.2
+    */
+  object InvalidSetting {
+    def unapply(setting: Setting): Option[Http2Exception] = setting match {
+      case MAX_FRAME_SIZE(size) if 16384 > size || size > 16777215 =>
+        Some(Http2Exception.PROTOCOL_ERROR.goaway(s"Invalid MAX_FRAME_SIZE: $size"))
+
+      case Setting(code, value) if value < 0 =>
+        val ex = Http2Exception.PROTOCOL_ERROR.goaway(s"Integer overflow for setting ${setting.name}: ${value}")
+        Some(ex)
+
+      case _ => None
+    }
   }
 
   final case class SettingKey(code: Int, name: String) {
     override def toString = name
 
     /** Create a new `Setting` with the provided value */
-    def apply(value: Long): Setting = Setting(code, value)
+    def apply(value: SettingValue): Setting = Setting(code, value)
 
     /** Extract the value from the key */
-    def unapply(setting: Setting): Option[Long] =
+    def unapply(setting: Setting): Option[SettingValue] =
       if (setting.code == code) Some(setting.value)
       else None
   }
@@ -83,7 +100,7 @@ final class Http2Settings private(
 
   def toSeq: Seq[Setting] = Seq(
     HEADER_TABLE_SIZE(headerTableSize),
-    ENABLE_PUSH(if (pushEnabled) 1l else 0l),
+    ENABLE_PUSH(if (pushEnabled) 1 else 0),
     MAX_CONCURRENT_STREAMS(maxInboundStreams),
     INITIAL_WINDOW_SIZE(initialWindowSize),
     MAX_FRAME_SIZE(maxFrameSize),

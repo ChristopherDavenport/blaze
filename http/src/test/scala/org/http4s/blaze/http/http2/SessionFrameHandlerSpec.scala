@@ -3,15 +3,13 @@ package org.http4s.blaze.http.http2
 import scala.language.reflectiveCalls
 import java.nio.ByteBuffer
 
-import org.http4s.blaze.http.{Headers, http2}
-import org.http4s.blaze.http.http2.Http2Exception.ErrorGenerator
+import org.http4s.blaze.http.Headers
 import org.http4s.blaze.http.http2.Http2Settings.Setting
-import org.specs2.matcher.MatchResult
 import org.specs2.mutable.Specification
 
 import scala.collection.mutable
 
-class SessionFrameHandlerSpec extends Specification {
+class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
 
   private class Ctx(isClient: Boolean) {
     lazy val tools = new Http2MockTools(isClient)
@@ -33,12 +31,6 @@ class SessionFrameHandlerSpec extends Specification {
       override def onGoAwayFrame(lastStream: Int, errorCode: Long, debugData: ByteBuffer): Http2Result = ???
     }
   }
-
-  def connectionError(gen: ErrorGenerator): PartialFunction[Http2Result, MatchResult[_]] = {
-    case Error(e: Http2SessionException) => e.code must_== gen.code
-  }
-
-  val ConnectionProtoError: PartialFunction[Http2Result, MatchResult[_]] = connectionError(Http2Exception.PROTOCOL_ERROR)
 
   "SessionFrameHandler" >> {
 
@@ -154,8 +146,8 @@ class SessionFrameHandlerSpec extends Specification {
           ctx.activeStreams.put(2, ctx.tools.newStream(2))
           ctx.tools.flowControl.sessionInboundAcked(100) // give some space in the session
           val w = ctx.activeStreams(2).flowWindow
-          assert(w.inboundObserved(w.inboundWindow))
-          assert(w.inboundWindow == 0)
+          assert(w.inboundObserved(w.streamInboundWindow))
+          assert(w.streamInboundWindow == 0)
           ctx.handler.onDataFrame(2, true, bytes(10), 10) must beLike(FlowControlError)
         }
       }
@@ -181,11 +173,11 @@ class SessionFrameHandlerSpec extends Specification {
         val sessionWindow = ctx.tools.flowControl.sessionInboundWindow
 
         val w = ctx.activeStreams(2).flowWindow
-        val streamWindow = w.inboundWindow
+        val streamWindow = w.streamInboundWindow
         ctx.handler.onDataFrame(2, true, bytes(10), 10) must_== Continue
 
         ctx.tools.flowControl.sessionInboundWindow must_== sessionWindow - 10
-        w.inboundWindow must_== streamWindow - 10
+        w.streamInboundWindow must_== streamWindow - 10
       }
     }
 
@@ -275,7 +267,7 @@ class SessionFrameHandlerSpec extends Specification {
         val stream = ctx.tools.newStream(2)
         ctx.activeStreams.put(2, stream)
         ctx.handler.onWindowUpdateFrame(2 /*streamid*/, 1 /*increment*/) must_== Continue
-        stream.flowWindow.outboundWindow must_== startFlowWindow + 1
+        stream.flowWindow.streamOutboundWindow must_== startFlowWindow + 1
         ctx.activeStreams(2).outboundFlowAcks must_== 1  // make sure the stream was notified
       }
 

@@ -102,9 +102,11 @@ private abstract class Http2StreamState(
   /** Called when the outbound flow window of the session or this stream has had some data
     * acked and we may now be able to make forward progress.
     */
-  def outboundFlowAcked(): Unit = {
-    // TODO: we may already be registered. Maybe keep track of that state?
-    if (writePromise != null) writeListener.registerWriteInterest(this)
+  def outboundFlowWindowChanged(): Unit = {
+    // TODO: we may already be registered. Maybe keep track of that state? Maybe also want to unregister.
+    if (writePromise != null && flowWindow.outboundWindowAvailable) {
+      writeListener.registerWriteInterest(this)
+    }
   }
 
   /** Must be called by the [[WriteController]] from within the session executor
@@ -144,7 +146,7 @@ private abstract class Http2StreamState(
           val slice = BufferTools.takeSlice(data, allowedBytes)
           val buffers = http2FrameEncoder.dataFrame(streamId, slice, false)
 
-          if (flowWindow.outboundWindow > 0) {
+          if (flowWindow.streamOutboundWindow > 0) {
             // We were not limited by the flow window so signal interest in another write cycle.
             writeListener.registerWriteInterest(this)
           }
@@ -161,7 +163,7 @@ private abstract class Http2StreamState(
           () // nop
 
         case Command.Disconnect =>
-          closeWithError(None)
+          closeWithError(None) // will send a RST_STREAM, if necessary
 
         case Command.Error(ex: Http2StreamException) =>
           // Since the pipeline doesn't actually know what streamId it is
@@ -190,7 +192,7 @@ private abstract class Http2StreamState(
     }
     else {
       // Inbound flow window violated. Technically, if it was a stream overflow,
-      // this could be a stream error, but we don't care and just kill the session.
+      // this could be a stream error, but we are strict and just kill the session.
       Http2Exception.FLOW_CONTROL_ERROR.goaway(s"stream($streamId) flow control error").toError
     }
   }
@@ -258,7 +260,7 @@ private abstract class Http2StreamState(
         pendingBytes += pendingInboundMessages.poll().flowBytes
       }
 
-      flowWindow.session.sessionInboundConsumed(pendingBytes)
+      flowWindow.sessionFlowControl.sessionInboundConsumed(pendingBytes)
     } else {
       val p = pendingRead
       pendingRead = null

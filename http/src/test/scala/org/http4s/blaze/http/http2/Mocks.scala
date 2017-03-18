@@ -42,9 +42,9 @@ private class MockHttp2StreamState(
   /** Called when the outbound flow window of the session or this stream has had some data
     * acked and we may now be able to make forward progress.
     */
-  override def outboundFlowAcked(): Unit = {
+  override def outboundFlowWindowChanged(): Unit = {
     outboundFlowAcks += 1
-    super.outboundFlowAcked()
+    super.outboundFlowWindowChanged()
   }
 
   /** Deals with stream related errors */

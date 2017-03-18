@@ -3,7 +3,17 @@ package org.http4s.blaze.http.http2
 import java.nio.ByteBuffer
 import Http2Settings.Setting
 
-/** Handles the HTTP messages defined in https://tools.ietf.org/html/rfc7540 */
+/** Handles the HTTP messages defined in https://tools.ietf.org/html/rfc7540
+  *
+  * It is expected that implementations will handle validation errors based on the incoming data:
+  * the supplier of the data (commonly a [[Http20FrameDecoder]]) is responsible for ensuring that
+  * the frames are properly formatted but doesn't concern itself with validating the sanity of a
+  * frames content.
+  *
+  * For example, the `FrameDecoder` is responsible for ensuring that the body of a WINDOW_UPDATE
+  * is 4 bytes long and the `FrameHandler` would be expected to signal an error if the
+  * window increment was 0 or the update was for an idle stream.
+  */
 trait Http20FrameHandler {
 
   /** Determine whether we are in the midst of a sequence of header and header continuation frames

@@ -246,22 +246,60 @@ private abstract class Http2ConnectionImpl(
 
     override def onSettingsFrame(ack: Boolean, settings: Seq[Setting]): Http2Result = {
       import Http2Settings._
-      if (!ack) settings.foreach {
-        case HEADER_TABLE_SIZE(size)      =>
-          peerSettings.headerTableSize = size.toInt
-          http2Encoder.setMaxTableSize(size.toInt)
+      // TODO: we don't consider the uncertainty between us sending a SETTINGS frame and its ack
+      if (ack) Continue
+      else {
+        var result: Http2Result = Continue
 
-        case ENABLE_PUSH(enabled)         => peerSettings.pushEnabled = enabled != 0
-        case MAX_CONCURRENT_STREAMS(max)  => peerSettings.maxInboundStreams = max.toInt
-        case INITIAL_WINDOW_SIZE(size)    => peerSettings.initialWindowSize = size.toInt
-        case MAX_FRAME_SIZE(size)         => peerSettings.maxFrameSize = size.toInt
-        case MAX_HEADER_LIST_SIZE(size)   =>
-          peerSettings.maxHeaderListSize = size.toInt // TODO: what should we do about this?
+        def initialWindowSizeChange(newSize: Int): Unit = {
+          // https://tools.ietf.org/html/rfc7540#section-6.9.2
+          // a receiver MUST adjust the size of all stream flow-control windows that
+          // it maintains by the difference between the new value and the old value.
+          val diff = newSize - peerSettings.initialWindowSize
+          if (diff != 0) {
+            peerSettings.initialWindowSize = newSize
 
-        case unknown =>
-          logger.info(s"Received unknown setting: $unknown")
+            activeStreams.values.forall { stream =>
+              val e = stream.flowWindow.peerSettingsInitialWindowChange(diff)
+              if (e != Continue && result == Continue) {
+                result = e
+                false
+              } else {
+                stream.outboundFlowWindowChanged()
+                true
+              }
+            }
+          }
+        }
+
+        val it = settings.iterator
+        while (it.hasNext && result == Continue) it.next() match {
+          case i@InvalidSetting(ex)         =>
+            logger.debug(ex)(s"Received invalid setting $i")
+            result = ex.toError
+
+          case HEADER_TABLE_SIZE(size)      =>
+            peerSettings.headerTableSize = size.toInt
+            http2Encoder.setMaxTableSize(size.toInt)
+
+          case ENABLE_PUSH(enabled)         => peerSettings.pushEnabled = enabled != 0
+          case MAX_CONCURRENT_STREAMS(max)  => peerSettings.maxInboundStreams = max.toInt
+          case INITIAL_WINDOW_SIZE(size)    => initialWindowSizeChange(size)
+          case MAX_FRAME_SIZE(size)         => peerSettings.maxFrameSize = size
+          case MAX_HEADER_LIST_SIZE(size)   =>
+            peerSettings.maxHeaderListSize = size // TODO: what should we do about this?
+
+          case unknown =>
+            logger.info(s"Received unknown setting: $unknown")
+        }
+
+        if (result == Continue) {
+          // ack the SETTINGS frame on success, otherwise we are tearing down the connection anyway so no need
+          writeController.writeOutboundData(Http20FrameSerializer.mkSettingsFrame(true, Nil))
+        }
+
+        result
       }
-      Continue
     }
 
     override def onGoAwayFrame(lastStream: Int, errorCode: Long, debugData: ByteBuffer): Http2Result = {

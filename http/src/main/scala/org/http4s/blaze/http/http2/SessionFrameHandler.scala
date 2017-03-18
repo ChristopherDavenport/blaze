@@ -128,7 +128,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
       val result = sessionFlowControl.sessionOutboundAcked(sizeIncrement)
       if (result.success) {
         // TODO: do we need to wake all the open streams in every case? Maybe just when we go from 0 to > 0?
-        activeStreams.values.foreach(_.outboundFlowAcked())
+        activeStreams.values.foreach(_.outboundFlowWindowChanged())
       }
       logger.debug(s"Session flow update: $sizeIncrement. Result: $result")
       result
@@ -141,7 +141,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
       case Some(stream) =>
         val result = stream.flowWindow.outboundAcked(sizeIncrement)
         if (result.success) {
-          stream.outboundFlowAcked()
+          stream.outboundFlowWindowChanged()
         }
         logger.debug(s"Stream(${stream.streamId}) WINDOW_UPDATE($sizeIncrement). Result: $result")
         result

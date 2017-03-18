@@ -57,7 +57,7 @@ object SettingsDecoder {
 
     def go(remaining: Int): Unit = if (remaining > 0) {
       val id: Int = buffer.getShort() & 0xffff
-      val value: Long = buffer.getInt() & 0xffffffffl
+      val value = buffer.getInt()
       settings += Setting(id, value)
       go(remaining - 1)
     }
