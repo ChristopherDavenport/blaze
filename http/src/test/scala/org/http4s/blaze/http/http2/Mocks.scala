@@ -32,10 +32,25 @@ private class MockHttp2StreamState(
     val streamId: Int, tools: Http2MockTools)
   extends Http2StreamState(tools.writeListener, tools.frameEncoder, tools.sessionExecutor) {
 
+  var outboundFlowAcks: Int = 0
+
+  var onStreamFinishedResult: Option[Option[Http2Exception]] = None
+
   override val flowWindow: StreamFlowWindow = tools.flowControl.newStreamFlowWindow(streamId)
 
+
+  /** Called when the outbound flow window of the session or this stream has had some data
+    * acked and we may now be able to make forward progress.
+    */
+  override def outboundFlowAcked(): Unit = {
+    outboundFlowAcks += 1
+    super.outboundFlowAcked()
+  }
+
   /** Deals with stream related errors */
-  override protected def onStreamFinished(ex: Option[Http2Exception]): Unit = ???
+  override protected def onStreamFinished(ex: Option[Http2Exception]): Unit = {
+    onStreamFinishedResult = Some(ex)
+  }
 
   override protected def maxFrameSize: Int = tools.mySettings.maxFrameSize
 }

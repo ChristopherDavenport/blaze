@@ -110,36 +110,41 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
   }
 
   override def onWindowUpdateFrame(streamId: Int, sizeIncrement: Int): Http2Result = {
-    if (streamId == 0) {
-      val result = sessionFlowControl.sessionOutboundAcked(sizeIncrement)
-      if (result.success) {
-        onSessionFlowUpdate(sizeIncrement)
-      }
-      result
-    }
-    else if (idManager.isIdleId(streamId)) {
+    if (idManager.isIdleId(streamId)) {
       PROTOCOL_ERROR.goaway(s"WINDOW_UPDATE on uninitialized stream ($streamId)").toError
     }
+    else if (sizeIncrement <= 0) {
+      // Illegal update size. https://tools.ietf.org/html/rfc7540#section-6.9
+      if (streamId == 0) PROTOCOL_ERROR.goaway(s"Session WINDOW_UPDATE of invalid size: $sizeIncrement").toError
+      else {
+        val err = FLOW_CONTROL_ERROR.rst(streamId, s"Session WINDOW_UPDATE of invalid size: $sizeIncrement")
+        // We don't remove the stream: it is still 'active' and `closeWithError` will trigger sending
+        // the RST_STREAM and removing the exception from the active streams collection
+        activeStreams.get(streamId).foreach(_.closeWithError(Some(err)))
+        err.toError
+      }
+    }
+    else if (streamId == 0) {
+      val result = sessionFlowControl.sessionOutboundAcked(sizeIncrement)
+      if (result.success) {
+        // TODO: do we need to wake all the open streams in every case? Maybe just when we go from 0 to > 0?
+        activeStreams.values.foreach(_.outboundFlowAcked())
+      }
+      logger.debug(s"Session flow update: $sizeIncrement. Result: $result")
+      result
+    }
     else activeStreams.get(streamId) match {
-      case None => Continue // nop
+      case None =>
+        logger.debug(s"Stream WINDOW_UPDATE($sizeIncrement) for closed stream $streamId")
+        Continue // nop
+
       case Some(stream) =>
         val result = stream.flowWindow.outboundAcked(sizeIncrement)
         if (result.success) {
-          onStreamFlowUpdate(stream, sizeIncrement)
+          stream.outboundFlowAcked()
         }
+        logger.debug(s"Stream(${stream.streamId}) WINDOW_UPDATE($sizeIncrement). Result: $result")
         result
     }
-  }
-
-  private[this] def onSessionFlowUpdate(count: Int): Unit = {
-    logger.debug(s"Session flow update: $count")
-    // We need to check the streams to see if any can now make forward progress
-    activeStreams.values.foreach(_.outboundFlowAcked())
-  }
-
-  private[this] def onStreamFlowUpdate(stream: StreamState, count: Int): Unit = {
-    logger.debug(s"Stream(${stream.streamId}) flow update: $count")
-    // We can now check this stream to see if it can make forward progress
-    stream.outboundFlowAcked()
   }
 }

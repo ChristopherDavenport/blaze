@@ -3,7 +3,7 @@ package org.http4s.blaze.http.http2
 import scala.language.reflectiveCalls
 import java.nio.ByteBuffer
 
-import org.http4s.blaze.http.Headers
+import org.http4s.blaze.http.{Headers, http2}
 import org.http4s.blaze.http.http2.Http2Exception.ErrorGenerator
 import org.http4s.blaze.http.http2.Http2Settings.Setting
 import org.specs2.matcher.MatchResult
@@ -14,9 +14,11 @@ import scala.collection.mutable
 class SessionFrameHandlerSpec extends Specification {
 
   private class Ctx(isClient: Boolean) {
-    val tools = new Http2MockTools(isClient)
+    lazy val tools = new Http2MockTools(isClient)
 
-    val activeStreams: mutable.HashMap[Int, MockHttp2StreamState] = new mutable.HashMap[Int, MockHttp2StreamState]()
+    lazy val activeStreams: mutable.HashMap[Int, MockHttp2StreamState] = new mutable.HashMap[Int, MockHttp2StreamState]()
+
+    lazy val handler: SessionFrameHandler[MockHttp2StreamState] = new MockSessionFrameHandler
 
     class MockSessionFrameHandler extends SessionFrameHandler[MockHttp2StreamState](
       tools.mySettings,
@@ -42,7 +44,7 @@ class SessionFrameHandlerSpec extends Specification {
 
     "on HEADERS frame" >> {
       class HandlerCtx(isClient: Boolean) extends Ctx(isClient) {
-        val handler = new MockSessionFrameHandler {
+        override lazy val handler = new MockSessionFrameHandler {
           var observedStreamId: Option[Int] = None
           override protected def newInboundStream(streamId: Int): Option[MockHttp2StreamState] = {
             observedStreamId = Some(streamId)
@@ -85,7 +87,7 @@ class SessionFrameHandlerSpec extends Specification {
     "on PUSH_PROMISE frame" >> {
       case class PushPromise(streamId: Int, promisedId: Int, headers: Headers)
       class HandlerCtx(isClient: Boolean) extends Ctx(isClient) {
-        val handler = new MockSessionFrameHandler {
+        override lazy val handler = new MockSessionFrameHandler {
           var result: Option[PushPromise] = None
           override protected def handlePushPromise(streamId: Int, promisedId: Int, headers: Headers): Http2Result = {
             result = Some(PushPromise(streamId, promisedId, headers))
@@ -130,28 +132,24 @@ class SessionFrameHandlerSpec extends Specification {
 
     "on DATA frame" >> {
       def bytes(i: Int): ByteBuffer = ByteBuffer.wrap(new Array(i))
-      class HandlerCtx(isClient: Boolean) extends Ctx(isClient) {
-        val handler = new MockSessionFrameHandler
-      }
-
       val FlowControlError = connectionError(Http2Exception.FLOW_CONTROL_ERROR)
 
       "connection PROTOCOL_ERROR" >> {
         "idle stream" >> {
-          val ctx = new HandlerCtx(true)
+          val ctx = new Ctx(true)
           ctx.handler.onDataFrame(1, true, bytes(10), 10) must beLike(ConnectionProtoError)
           ctx.handler.onDataFrame(2, true, bytes(10), 10) must beLike(ConnectionProtoError)
         }
 
         "session flow window overflow" >> {
-          val ctx = new HandlerCtx(true)
+          val ctx = new Ctx(true)
           ctx.tools.idManager.observeInboundId(1)
           assert(ctx.tools.flowControl.sessionInboundObserved(ctx.tools.flowControl.sessionInboundWindow))
           ctx.handler.onDataFrame(1, true, bytes(10), 10) must beLike(FlowControlError)
         }
 
         "stream flow window overflow" >> {
-          val ctx = new HandlerCtx(true)
+          val ctx = new Ctx(true)
           ctx.tools.idManager.observeInboundId(2)
           ctx.activeStreams.put(2, ctx.tools.newStream(2))
           ctx.tools.flowControl.sessionInboundAcked(100) // give some space in the session
@@ -164,7 +162,7 @@ class SessionFrameHandlerSpec extends Specification {
 
       "stream STREAM_CLOSED on closed stream" >> {
         "session flow window overflow" >> {
-          val ctx = new HandlerCtx(true)
+          val ctx = new Ctx(true)
           ctx.tools.idManager.observeInboundId(2)
           val w = ctx.tools.flowControl.sessionInboundWindow
           ctx.handler.onDataFrame(2, true, bytes(10), 10) must beLike {
@@ -176,7 +174,7 @@ class SessionFrameHandlerSpec extends Specification {
       }
 
       "give data to a open stream with available flow window" >> {
-        val ctx = new HandlerCtx(true)
+        val ctx = new Ctx(true)
         ctx.tools.idManager.observeInboundId(2)
         val stream = ctx.tools.newStream(2)
         ctx.activeStreams.put(2, stream)
@@ -189,6 +187,98 @@ class SessionFrameHandlerSpec extends Specification {
         ctx.tools.flowControl.sessionInboundWindow must_== sessionWindow - 10
         w.inboundWindow must_== streamWindow - 10
       }
+    }
+
+    "on RST_STREAM" >> {
+      "idle stream is connection PROTOCOL_ERROR" >> {
+        val ctx = new Ctx(true)
+        ctx.handler.onRstStreamFrame(1, 1) must beLike(ConnectionProtoError)
+      }
+
+      "closed stream is ok" >> {
+        val ctx = new Ctx(true)
+        val id = 2
+        ctx.tools.idManager.observeInboundId(id)
+        ctx.handler.onRstStreamFrame(id, 1 /*code*/) must_== Continue
+      }
+
+      "open stream is removed" >> {
+        val ctx = new Ctx(true)
+        val id = 2
+        ctx.tools.idManager.observeInboundId(id)
+        val mockStream = ctx.tools.newStream(id)
+        ctx.activeStreams.put(id, mockStream)
+        ctx.handler.onRstStreamFrame(id, 1 /*code*/) must_== Continue // don't reply with a RST_STREAM to a RST_STREAM
+        ctx.activeStreams.get(id) must beNone
+        mockStream.onStreamFinishedResult must beLike { case Some(Some(e: Http2StreamException)) => e.code must_== 1 }
+      }
+    }
+
+    "on WINDOW_UPDATE" >> {
+      val startFlowWindow = new Ctx(true).tools.mySettings.initialWindowSize
+      "connection PROTOCOL_ERROR on idle stream update stream" >> {
+        val ctx = new Ctx(true)
+        ctx.handler.onWindowUpdateFrame(1 /*streamid*/, 1 /*increment*/) must beLike(ConnectionProtoError)
+        ctx.tools.flowControl.sessionOutboundWindow must_== startFlowWindow
+        ctx.activeStreams.isEmpty must beTrue
+      }
+
+      "invalid increment" >> {
+        Set(-1, 0).foreach { inc =>
+          val ctx = new Ctx(true)
+          ctx.tools.idManager.observeInboundId(2)
+          ctx.handler.onWindowUpdateFrame(0 /*streamid*/, inc /*increment*/) must beLike(ConnectionProtoError)
+          ctx.handler.onWindowUpdateFrame(2 /*streamid*/, inc /*increment*/) must beLike {
+            case Error(ex: Http2StreamException) =>
+              ex.code must_== Http2Exception.FLOW_CONTROL_ERROR.code
+              ex.stream must_== 2
+          }
+        }
+        ok
+      }
+
+      "invalid increment on open stream" >> {
+        val ctx = new Ctx(true)
+        ctx.tools.idManager.observeInboundId(2)
+        val stream = ctx.tools.newStream(2)
+        ctx.activeStreams.put(2, stream)
+        val result = ctx.handler.onWindowUpdateFrame(2 /*streamid*/, 0 /*increment*/)
+        result must beLike {
+          case Error(ex: Http2StreamException) =>
+            ex.code must_== Http2Exception.FLOW_CONTROL_ERROR.code
+            ex.stream must_== 2
+        }
+
+        stream.onStreamFinishedResult must beLike {
+          case Some(Some(ex: Http2StreamException)) =>
+            ex.code must_== Http2Exception.FLOW_CONTROL_ERROR.code
+            ex.stream must_== 2
+        }
+        // call to `streamFinished(Some(ex))` is responsible for removing the stream from the live set,
+        // but the mock implementation doesn't do that
+        ctx.activeStreams.get(2) must beSome(stream)
+      }
+
+      "connection flow update" >> {
+        val ctx = new Ctx(true)
+        ctx.tools.idManager.observeInboundId(2)
+        ctx.activeStreams.put(2, ctx.tools.newStream(2))
+        ctx.handler.onWindowUpdateFrame(0 /*streamid*/, 1 /*increment*/) must_== Continue
+        ctx.tools.flowControl.sessionOutboundWindow must_== startFlowWindow + 1
+        ctx.activeStreams(2).outboundFlowAcks must_== 1 // make sure the streams were notified
+
+      }
+
+      "stream flow update" >> {
+        val ctx = new Ctx(true)
+        ctx.tools.idManager.observeInboundId(2)
+        val stream = ctx.tools.newStream(2)
+        ctx.activeStreams.put(2, stream)
+        ctx.handler.onWindowUpdateFrame(2 /*streamid*/, 1 /*increment*/) must_== Continue
+        stream.flowWindow.outboundWindow must_== startFlowWindow + 1
+        ctx.activeStreams(2).outboundFlowAcks must_== 1  // make sure the stream was notified
+      }
+
     }
   }
 }

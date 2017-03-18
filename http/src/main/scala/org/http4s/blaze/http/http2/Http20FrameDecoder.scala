@@ -23,8 +23,6 @@ class Http20FrameDecoder(
       return BufferUnderflow
     }
 
-    val s = BufferTools.bufferToString(buffer.duplicate())
-
     buffer.mark()
     val len  = getLengthField(buffer)
     val frameType = buffer.get()

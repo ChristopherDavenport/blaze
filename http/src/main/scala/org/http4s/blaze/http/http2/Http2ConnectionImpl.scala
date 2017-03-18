@@ -420,7 +420,7 @@ private abstract class Http2ConnectionImpl(
           lazyStreamId = streamId
           lazyFlowWindow = sessionFlowControl.newStreamFlowWindow(streamId)
           assert(activeStreams.put(streamId, this).isEmpty)
-          logger.info(s"Created new OutboundStream with id $streamId. $activeStreamCount streams.")
+          logger.debug(s"Created new OutboundStream with id $streamId. $activeStreamCount streams.")
           super.invokeStreamWrite(msg, p)
 
         case None =>

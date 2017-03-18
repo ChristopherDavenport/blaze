@@ -40,17 +40,15 @@ private final class StreamIdManager private(
     isIdleInboundId(id) || isIdleOutboundId(id)
 
   /** Determine if the stream id is an outbound stream id */
-  def isOutboundId(id: Int): Boolean = !isInboundId(id)
+  def isOutboundId(id: Int): Boolean = !isInboundId(id) && id > 0
 
   /** Determine if the stream id is both an inbound id and is idle */
   def isIdleInboundId(id: Int): Boolean =
-    isInboundId(id) && id >= nextInbound
+    isInboundId(id) && id >= nextInbound &&  nextInbound > 0 // make sure we didn't overflow
 
   /** Determine if the stream id is both an outbound id and is idle */
   def isIdleOutboundId(id: Int): Boolean = {
-    isOutboundId(id) &&
-      id >= nextOutbound &&
-      nextOutbound > 0 // make sure we didn't overflow
+    isOutboundId(id) && id >= nextOutbound && nextOutbound > 0 // make sure we didn't overflow
   }
 
   /** Determine if the client ID is valid based on the stream history */

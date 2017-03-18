@@ -36,12 +36,14 @@ class StreamIdManagerSpec extends Specification {
         val manager = newManager()
         manager.isOutboundId(1) must beTrue
         manager.isOutboundId(2) must beFalse
+        manager.isOutboundId(0) must beFalse
       }
 
       "isInboundId" in {
         val manager = newManager()
         manager.isInboundId(1) must beFalse
         manager.isInboundId(2) must beTrue
+        manager.isInboundId(0) must beFalse
       }
 
       "isIdleInboundId" in {
