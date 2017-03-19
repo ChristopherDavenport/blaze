@@ -2,7 +2,6 @@ package org.http4s.blaze.channel.nio1
 
 
 import org.http4s.blaze.pipeline.{Command => Cmd}
-import org.http4s.blaze.util.BufferTools
 import org.http4s.blaze.pipeline._
 import org.http4s.blaze.channel.BufferPipelineBuilder
 
@@ -173,10 +172,10 @@ final class SelectorLoop(id: String, selector: Selector, bufferSize: Int) extend
   }
 
   private def killSelector() {
-    import scala.collection.JavaConversions._
+    import scala.collection.JavaConverters._
 
     try {
-      selector.keys().foreach { k =>
+      selector.keys().asScala.foreach { k =>
         try {
           val head = k.attachment()
           if (head != null) {

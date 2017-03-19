@@ -36,8 +36,8 @@ class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
 
     "on HEADERS frame" >> {
       class HandlerCtx(isClient: Boolean) extends Ctx(isClient) {
+        var observedStreamId: Option[Int] = None
         override lazy val handler = new MockSessionFrameHandler {
-          var observedStreamId: Option[Int] = None
           override protected def newInboundStream(streamId: Int): Option[MockHttp2StreamState] = {
             observedStreamId = Some(streamId)
             None
@@ -48,13 +48,13 @@ class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
       "result in a protocol for stream ID 0" >> {
         val ctx = new HandlerCtx(false)
         ctx.handler.onCompleteHeadersFrame(0, None, true, Nil) must beLike(ConnectionProtoError)
-        ctx.handler.observedStreamId must beNone
+        ctx.observedStreamId must beNone
       }
 
       "result in a PROTOCOL_ERROR for idle outbound stream" >> {
         val ctx = new HandlerCtx(false)
         ctx.handler.onCompleteHeadersFrame(2, None, true, Nil) must beLike(ConnectionProtoError)
-        ctx.handler.observedStreamId must beNone
+        ctx.observedStreamId must beNone
       }
 
       "result in a Http2StreamException with code STREAM_CLOSED for closed outbound stream" >> {
@@ -63,7 +63,7 @@ class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
         ctx.handler.onCompleteHeadersFrame(id, None, true, Nil) must beLike { case Error(err: Http2StreamException) =>
           err.code must_== Http2Exception.STREAM_CLOSED.code
         }
-        ctx.handler.observedStreamId must beNone
+        ctx.observedStreamId must beNone
       }
 
       "initiate a new stream for idle inbound stream (server)" >> {
@@ -71,7 +71,7 @@ class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
         ctx.handler.onCompleteHeadersFrame(1, None, true, Nil) must beLike { case Error(err) =>
           err.code must_== Http2Exception.REFUSED_STREAM.code
         }
-        ctx.handler.observedStreamId must beSome(1)
+        ctx.observedStreamId must beSome(1)
         ctx.tools.idManager.lastInboundStream must_== 1
       }
     }
@@ -79,10 +79,10 @@ class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
     "on PUSH_PROMISE frame" >> {
       case class PushPromise(streamId: Int, promisedId: Int, headers: Headers)
       class HandlerCtx(isClient: Boolean) extends Ctx(isClient) {
+        var pushPromiseResult: Option[PushPromise] = None
         override lazy val handler = new MockSessionFrameHandler {
-          var result: Option[PushPromise] = None
           override protected def handlePushPromise(streamId: Int, promisedId: Int, headers: Headers): Http2Result = {
-            result = Some(PushPromise(streamId, promisedId, headers))
+            pushPromiseResult = Some(PushPromise(streamId, promisedId, headers))
             Continue
           }
         }
@@ -118,7 +118,7 @@ class SessionFrameHandlerSpec extends Specification with Http2SpecTools {
         val ctx = new HandlerCtx(true)
         val Some(id) = ctx.tools.idManager.takeOutboundId()
         ctx.handler.onCompletePushPromiseFrame(id, id + 1, Nil) must_== Continue
-        ctx.handler.result must beSome(PushPromise(id, id + 1, Nil))
+        ctx.pushPromiseResult must beSome(PushPromise(id, id + 1, Nil))
       }
     }
 

@@ -16,7 +16,7 @@ sealed trait StreamMessage {
   *             The `ByteBuffer` indexes are considered owned by this DataFrame, but its
   *             data must not be modified.
   */
-case class DataFrame private(endStream: Boolean, data: ByteBuffer) extends StreamMessage {
+case class DataFrame(endStream: Boolean, data: ByteBuffer) extends StreamMessage {
   def flowBytes = data.remaining()
 }
 

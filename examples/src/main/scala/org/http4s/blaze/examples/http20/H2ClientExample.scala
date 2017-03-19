@@ -15,11 +15,11 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 
-object H2ClientExample {
+abstract class H2ClientExample(count: Int, timeout: Duration) {
 
-  implicit val ec = Execution.trampoline
+  protected implicit val ec = Execution.trampoline
 
-  val h2Clients: Array[HttpClient] = Array.tabulate(3){_ => Http2Client.newH2Client() }
+  lazy val h2Clients: Array[HttpClient] = Array.tabulate(3){_ => Http2Client.newH2Client() }
 
   private def gunzipString(data: ByteBuffer): String = {
     val is = new InputStream {
@@ -75,18 +75,20 @@ object H2ClientExample {
     }
   }
 
+  def doCall(tag: Int): Future[Int]
+
   def main(args: Array[String]): Unit = {
     println("Hello, world!")
 
-    Await.result(Future.sequence((0 until h2Clients.length).map(callLocalhost)), 5.seconds)
+    Await.result(Future.sequence((0 until h2Clients.length).map(doCall)), 5.seconds)
 
     def fresps(i: Int) = (h2Clients.length until i).map { i =>
-      callLocalhost(i).map(i -> _)
+      doCall(i).map(i -> _)
     }
 
-    Await.result(Future.sequence(fresps(100)), 500.seconds)
+    Await.result(Future.sequence(fresps(count / 5)), timeout)
     val start = System.currentTimeMillis
-    val resps = Await.result(Future.sequence(fresps(500)), 500.seconds)
+    val resps = Await.result(Future.sequence(fresps(count)), timeout)
     val duration = System.currentTimeMillis - start
 
     val chars = resps.foldLeft(0){ case (acc, (i, len)) =>
@@ -97,5 +99,16 @@ object H2ClientExample {
 
 //    println(s"First response:\n" + r1)
   }
+}
 
+object H2LocalhostExample extends H2ClientExample(500, 300.seconds) {
+  override def doCall(tag: Int): Future[Int] = callLocalhost(tag)
+}
+
+object H2GoogleExample extends H2ClientExample(20, 30.seconds) {
+  override def doCall(tag: Int): Future[Int] = callGoogle(tag).map(_.length)
+}
+
+object H2TwitterExample extends H2ClientExample(20, 30.seconds) {
+  override def doCall(tag: Int): Future[Int] = callTwitter(tag).map(_.length)
 }

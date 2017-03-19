@@ -50,11 +50,11 @@ class ALPNServerSelector(engine: SSLEngine,
   }
 
   private class ServerProvider extends ALPN.ServerProvider {
-    import scala.collection.JavaConversions._
+    import scala.collection.JavaConverters._
 
     override def select(protocols: util.List[String]): String = {
       logger.debug("Available protocols: " + protocols)
-      val s = selector(protocols)
+      val s = selector(protocols.asScala)
       selected = Some(s)
       s
     }
