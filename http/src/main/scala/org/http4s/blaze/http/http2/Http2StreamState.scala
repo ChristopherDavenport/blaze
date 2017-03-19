@@ -58,6 +58,7 @@ private abstract class Http2StreamState(
     sessionExecutor.execute(new Runnable {
       def run(): Unit = {
         if (pendingRead != null) p.failure(new IllegalStateException()) // TODO: should fail the stream, send RST, etc.
+        else if (streamIsClosed) p.tryFailure(EOF)
         else pendingInboundMessages.poll() match {
           case null if receivedEndStream => p.tryFailure(EOF)
           case null => pendingRead = p

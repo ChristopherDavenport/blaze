@@ -1,7 +1,6 @@
 package org.http4s.blaze.http.http2
 
-import scala.language.reflectiveCalls
-
+import org.http4s.blaze.pipeline.Command.Disconnect
 import org.http4s.blaze.pipeline.{Command, LeafBuilder, TailStage}
 import org.http4s.blaze.util.BufferTools
 import org.specs2.mutable.Specification
@@ -109,6 +108,29 @@ class Http2StreamStateSpec extends Specification with Http2SpecTools {
         await(tail.channelRead(1)) must_== DataFrame(false, zeroBuffer(10))
         stage.flowWindow.streamUnconsumedBytes must_== 0
         tools.flowControl.sessionUnconsumedBytes must_== 0
+      }
+
+      "channelRead on receivedEndStream" >> {
+        val tools = newTools
+        val stage = new MockHttp2StreamState(1, tools)
+        val tail = makePipeline(stage)
+
+
+        stage.invokeInboundHeaders(None, endStream = true, Nil) must_== Continue
+
+        // messages
+        await(tail.channelRead(1)) must_== HeadersFrame(None, true, Nil)
+        await(tail.channelRead(1)) must throwA[Command.EOF.type]
+      }
+
+      "channelRead on stream closed event" >> {
+        val tools = newTools
+        val stage = new MockHttp2StreamState(1, tools)
+        val tail = makePipeline(stage)
+        tail.sendOutboundCommand(Disconnect)
+
+        // messages
+        await(tail.channelRead(1)) must throwA[Command.EOF.type]
       }
     }
 
@@ -311,8 +333,8 @@ class Http2StreamStateSpec extends Specification with Http2SpecTools {
 
       "only call `onStreamFinished` once even with multiple close events" >> {
         val tools = newTools
+        var onStreamFinishedCount = 0
         val stage = new MockHttp2StreamState(1, tools) {
-          var onStreamFinishedCount = 0
           override protected def onStreamFinished(ex: Option[Http2Exception]): Unit = {
             onStreamFinishedCount += 1
             super.onStreamFinished(ex)
@@ -320,16 +342,16 @@ class Http2StreamStateSpec extends Specification with Http2SpecTools {
         }
         val tail = makePipeline(stage)
 
-        stage.onStreamFinishedCount must_== 0
+        onStreamFinishedCount must_== 0
 
         tail.sendOutboundCommand(Command.Disconnect)
 
-        stage.onStreamFinishedCount must_== 1
+        onStreamFinishedCount must_== 1
 
         tail.sendOutboundCommand(Command.Disconnect)
         tail.sendOutboundCommand(Command.Error(Http2Exception.CANCEL.rst(-1)))
 
-        stage.onStreamFinishedCount must_== 1
+        onStreamFinishedCount must_== 1
       }
     }
   } // Http2StreamState

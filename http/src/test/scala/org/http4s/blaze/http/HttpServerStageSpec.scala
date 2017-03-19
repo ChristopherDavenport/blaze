@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets
 import org.http4s.blaze.http.http1.server.Http1ServerStage
 import org.http4s.blaze.http.parser.ResponseParser
 import org.http4s.blaze.pipeline.stages.GatheringSeqHead
-import org.http4s.blaze.pipeline.{Command, LeafBuilder}
+import org.http4s.blaze.pipeline.LeafBuilder
 import org.http4s.blaze.util.{BufferTools, Execution}
 import org.specs2.mutable.Specification
 
