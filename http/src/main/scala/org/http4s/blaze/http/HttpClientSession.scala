@@ -1,6 +1,6 @@
 package org.http4s.blaze.http
 
-import org.http4s.blaze.http.HttpClientSession.{ReleaseableResponse, Status}
+import org.http4s.blaze.http.HttpClientSession.{Closed, ReleaseableResponse, Status}
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
@@ -12,6 +12,9 @@ sealed trait HttpClientSession {
 
   /** Get the status of session */
   def status: Status
+
+  /** Return whether the client session `status == Closed` */
+  final def isClosed: Boolean = status == Closed
 
   /** Close the session within the specified duration.
     *

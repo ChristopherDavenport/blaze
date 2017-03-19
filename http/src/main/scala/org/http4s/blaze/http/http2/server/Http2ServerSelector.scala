@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 import javax.net.ssl.SSLEngine
 
 import org.http4s.blaze.http._
+import org.http4s.blaze.http.ALPNTokens._
 import org.http4s.blaze.http.http1.server.Http1ServerStage
 import org.http4s.blaze.http.http2.{Http2Settings, StreamMessage}
 import org.http4s.blaze.pipeline.{LeafBuilder, TailStage}
@@ -12,10 +13,6 @@ import org.log4s.getLogger
 object Http2ServerSelector {
 
   private val logger = getLogger
-
-  private val HTTP_1_1 = "http/1.1"
-  private val H2       = "h2"
-  private val H2_14    = "h2-14"
 
   def apply(engine: SSLEngine, 
            service: HttpService,
@@ -51,12 +48,5 @@ object Http2ServerSelector {
     mySettings.maxHeaderListSize = config.maxNonBodyBytes
 
     new Http2TlsServerHandshaker(mySettings, newNode)
-
-//    Http2Stage(
-//      nodeBuilder = newNode,
-//      timeout = Duration.Inf,
-//      ec = config.serviceExecutor,
-//      maxHeadersLength = config.maxNonBodyBytes
-//    )
   }
 }

@@ -14,6 +14,7 @@ import scala.util.{Failure, Success}
 class ALPNClientSelector(
     engine: SSLEngine,
     available: Seq[String],
+    default: String,
     builder: String => LeafBuilder[ByteBuffer])
   extends TailStage[ByteBuffer] {
   require(available.nonEmpty)
@@ -39,7 +40,7 @@ class ALPNClientSelector(
   private def selectPipeline(): Unit = {
     try {
       logger.debug(s"Client ALPN selected: $selected")
-      val tail = builder(selected.getOrElse(available.head)) // `.head` is safe because we've required the list be non-empty
+      val tail = builder(selected.getOrElse(default))
       this.replaceTail(tail, true)
     } catch {
       case t: Throwable =>

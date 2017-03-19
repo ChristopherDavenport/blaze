@@ -2,7 +2,13 @@ package org.http4s.blaze.http
 
 import scala.concurrent.Future
 
-/** Generator and pool of http sessions */
+/** Provider of HTTP sessions
+  *
+  * Implementations of this interface are responsible for providing a HTTP session
+  * on demand, ready to immediately perform a client request dispatch.
+  *
+  * @note It is required that the methods on implementations of this interface be thread safe.
+  */
 trait ClientSessionManager {
 
   /** Acquire a session that is believe to be healthy.

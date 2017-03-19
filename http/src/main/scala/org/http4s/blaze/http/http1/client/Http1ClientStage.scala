@@ -14,7 +14,7 @@ import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
 // TODO: we're totally logging all sorts of headers in here, which is bad for security
-private class Http1ClientStage(config: HttpClientConfig)
+private[http] class Http1ClientStage(config: HttpClientConfig)
   extends TailStage[ByteBuffer] with Http1ClientSession {
   import Http1ClientStage._
 

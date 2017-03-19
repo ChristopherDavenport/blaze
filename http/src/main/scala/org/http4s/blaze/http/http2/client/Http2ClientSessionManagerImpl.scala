@@ -23,6 +23,8 @@ class Http2ClientSessionManagerImpl(
     mySettings: Http2Settings)
   extends ClientSessionManager {
 
+  import ALPNTokens._
+
   private[this] val logger = getLogger
   private[this] val sessionCache = new mutable.HashMap[String, Future[Http2ClientConnection]]
   private[this] val factory = new ClientChannelFactory(group = config.group)
@@ -73,7 +75,7 @@ class Http2ClientSessionManagerImpl(
 
     def buildH2(s: String): LeafBuilder[ByteBuffer] = {
       logger.debug(s"Selected $s")
-      if (s != "h2") {
+      if (s != H2 && s != H2_14) {
         p.tryFailure(new Exception("Failed to negotiate h2. Selected: $s"))
         ???
       } else {
@@ -87,7 +89,7 @@ class Http2ClientSessionManagerImpl(
     val engine = config.getClientSslEngine()
     engine.setUseClientMode(true)
 
-    LeafBuilder(new ALPNClientSelector(engine, Seq("h2"), buildH2))
+    LeafBuilder(new ALPNClientSelector(engine, Seq(H2, H2_14), H2, buildH2))
       .prepend(new SSLStage(engine))
       .base(head)
 

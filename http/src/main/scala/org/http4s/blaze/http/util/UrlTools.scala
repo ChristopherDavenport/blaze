@@ -5,14 +5,18 @@ import java.net.{InetSocketAddress, URI}
 private[blaze] object UrlTools {
 
   case class UrlComposition(uri: URI) {
+    /** Lower case representation of the scheme */
+    val scheme: String = uri.getScheme.toLowerCase
 
-    def scheme: String = uri.getScheme
+    /** Lower case representation of the authority */
+    val authority: String = uri.getAuthority.toLowerCase
 
-    def authority: String = uri.getAuthority
+    def isTls: Boolean = scheme == "https"
 
-    def isTls: Boolean = scheme.equalsIgnoreCase("https")
-
-    def path: String = uri.getPath
+    def path: String = uri.getPath match {
+      case "" | null => "/"
+      case p => p
+    }
 
     def fullPath: String =
       if (uri.getQuery != null) path + "?" + uri.getQuery

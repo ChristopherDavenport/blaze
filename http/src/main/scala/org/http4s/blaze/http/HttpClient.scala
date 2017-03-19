@@ -45,4 +45,9 @@ object HttpClient {
     val pool = new BasicHttp1ClientSessionManager(HttpClientConfig.Default)
     new HttpClientImpl(pool)
   }
+
+  lazy val pooledHttpClient: HttpClient = {
+    val pool = new ClientSessionManagerImpl(HttpClientConfig.Default)
+    new HttpClientImpl(pool)
+  }
 }
