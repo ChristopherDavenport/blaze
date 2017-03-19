@@ -87,15 +87,21 @@ private abstract class Http2StreamState(
     if (sentEOS) {
       p.tryFailure(new IllegalStateException(s"Stream($streamId) already closed"))
     } else if (writePromise != null) {
+      closeWithError(Some(Http2Exception.INTERNAL_ERROR.rst(streamId)))
       p.tryFailure(new IllegalStateException(s"Already a pending write on this stream($streamId)"))
     }
     else if (streamIsClosed) {
+      sentEOS = msg.endStream
       p.tryFailure(EOF)
     } else {
       sentEOS = msg.endStream
       pendingOutboundFrame = msg
       writePromise = p
-      writeListener.registerWriteInterest(this)
+
+      // If this is a flow controlled frame and we can't write any bytes, don't register an interest
+      if (msg.flowBytes == 0 || flowWindow.outboundWindowAvailable) {
+        writeListener.registerWriteInterest(this)
+      }
     }
   }
 
@@ -132,6 +138,7 @@ private abstract class Http2StreamState(
         logger.debug(s"Allowed: $allowedBytes, data: $pendingOutboundFrame")
 
         if (allowedBytes == pendingOutboundFrame.flowBytes) {
+          // Writing the whole message
           val buffers = http2FrameEncoder.dataFrame(streamId, data, eos)
           pendingOutboundFrame = null
           writePromise.trySuccess(())
@@ -144,7 +151,7 @@ private abstract class Http2StreamState(
         } else {
           // We take a chunk, and then reregister ourselves with the listener
           val slice = BufferTools.takeSlice(data, allowedBytes)
-          val buffers = http2FrameEncoder.dataFrame(streamId, slice, false)
+          val buffers = http2FrameEncoder.dataFrame(streamId, slice, endStream = false)
 
           if (flowWindow.streamOutboundWindow > 0) {
             // We were not limited by the flow window so signal interest in another write cycle.
@@ -183,6 +190,7 @@ private abstract class Http2StreamState(
       closeWithError(None) // the GOAWAY will be sent by the FrameHandler
       STREAM_CLOSED.goaway(s"Stream($streamId received DATA frame after EOS").toError
     } else if (streamIsClosed) {
+      // Shouldn't get here: should have been removed from active streams
       STREAM_CLOSED.rst(streamId).toError
     } else if (flowWindow.inboundObserved(flowBytes)) {
       receivedEOS = eos
@@ -203,6 +211,7 @@ private abstract class Http2StreamState(
       closeWithError(None) // the GOAWAY will be sent by the FrameHandler
       STREAM_CLOSED.goaway(s"Stream($streamId received DATA frame after EOS").toError
     } else if (streamIsClosed) {
+      // Shouldn't get here: should have been removed from active streams
       STREAM_CLOSED.rst(streamId).toError
     } else {
       receivedEOS = eos
@@ -215,7 +224,6 @@ private abstract class Http2StreamState(
 
   // Shuts down the stream and calls `onStreamFinished` with any potential errors.
   // WARNING: this must be called from within the session executor.
-  // TODO: should add a way to signal that we don't want to send the error to the peer
   def closeWithError(t: Option[Throwable]): Unit = {
     if (!streamIsClosed) {
       streamIsClosed = true

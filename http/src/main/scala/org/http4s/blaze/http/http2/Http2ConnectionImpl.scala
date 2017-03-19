@@ -161,7 +161,7 @@ private abstract class Http2ConnectionImpl(
       }
 
       if (update.stream > 0) {
-        stream.inboundAcked(update.stream)
+        stream.streamInboundAcked(update.stream)
         writeController.writeOutboundData(http2Encoder.streamWindowUpdate(stream.streamId, update.stream))
       }
     }

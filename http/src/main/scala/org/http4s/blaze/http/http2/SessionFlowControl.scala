@@ -127,7 +127,7 @@ abstract class SessionFlowControl(
     override def peerSettingsInitialWindowChange(delta: Int): MaybeError =
       adjustOutbound(delta)
 
-    override def outboundAcked(count: Int): MaybeError = {
+    override def streamOutboundAcked(count: Int): MaybeError = {
       // Updates MUST be greater than 0, otherwise its protocol error
       // https://tools.ietf.org/html/rfc7540#section-6.9
       if (count <= 0)
@@ -183,7 +183,7 @@ abstract class SessionFlowControl(
       }
     }
 
-    override def inboundAcked(count: Int): Unit = {
+    override def streamInboundAcked(count: Int): Unit = {
       require(count >= 0)
       _streamInboundWindow += count
     }

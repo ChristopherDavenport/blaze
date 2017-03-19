@@ -15,7 +15,7 @@ private object Http20FrameSerializer {
       throw new IllegalArgumentException(msg)
   }
 
-  def mkDataFrame(streamId: Int, data: ByteBuffer, isLast: Boolean, padding: Byte): Seq[ByteBuffer] = {
+  def mkDataFrame(streamId: Int, data: ByteBuffer, endStream: Boolean, padding: Byte): Seq[ByteBuffer] = {
     // TODO: Setting a padding length of 0 is valid and a way to pad exactly 1 byte.
     // See note at the end of https://tools.ietf.org/html/rfc7540#section-6.1
 
@@ -28,7 +28,7 @@ private object Http20FrameSerializer {
       flags |= Flags.PADDED
     }
 
-    if (isLast) {
+    if (endStream) {
       flags |= Flags.END_STREAM
     }
 
@@ -46,8 +46,8 @@ private object Http20FrameSerializer {
   def mkHeaderFrame(streamId: Int,
                     headerData: ByteBuffer,
                     priority: Option[Priority],
-                    end_headers: Boolean,
-                    end_stream: Boolean,
+                    endHeaders: Boolean,
+                    endStream: Boolean,
                     padding: Byte): Seq[ByteBuffer] = {
 
     // TODO: Setting a padding length of 0 is valid and a way to pad exactly 1 byte.
@@ -69,8 +69,8 @@ private object Http20FrameSerializer {
       flags |= Flags.PRIORITY
     }
 
-    if (end_headers) flags |= Flags.END_HEADERS
-    if (end_stream)  flags |= Flags.END_STREAM
+    if (endHeaders) flags |= Flags.END_HEADERS
+    if (endStream)  flags |= Flags.END_STREAM
 
     val header = BufferTools.allocate(size1)
     writeFrameHeader(size1 - HeaderSize + headerData.remaining(), FrameTypes.HEADERS, flags.toByte, streamId, header)
@@ -131,10 +131,10 @@ private object Http20FrameSerializer {
   }
 
   def mkPushPromiseFrame(streamId: Int,
-                        promiseId: Int,
-                      end_headers: Boolean,
-                          padding: Int,
-                     headerBuffer: ByteBuffer): Seq[ByteBuffer] = {
+                         promiseId: Int,
+                         endHeaders: Boolean,
+                         padding: Int,
+                         headerBuffer: ByteBuffer): Seq[ByteBuffer] = {
 
     require(streamId != 0, "Invalid StreamID for PUSH_PROMISE frame")
     require(promiseId != 0 && promiseId % 2 == 0, "Invalid StreamID for PUSH_PROMISE frame")
@@ -143,7 +143,7 @@ private object Http20FrameSerializer {
     var size = 4
     var flags = 0
 
-    if (end_headers) flags |= Flags.END_HEADERS
+    if (endHeaders) flags |= Flags.END_HEADERS
 
     if (padding > 0) {
       flags |= Flags.PADDED
@@ -209,9 +209,9 @@ private object Http20FrameSerializer {
     buffer
   }
 
-  def mkContinuationFrame(streamId: Int, end_headers: Boolean, headerBuffer: ByteBuffer): Seq[ByteBuffer] = {
+  def mkContinuationFrame(streamId: Int, endHeaders: Boolean, headerBuffer: ByteBuffer): Seq[ByteBuffer] = {
     require(streamId > 0, "Invalid stream ID for CONTINUATION frame")
-    val flag = if (end_headers) Flags.END_HEADERS else 0x0
+    val flag = if (endHeaders) Flags.END_HEADERS else 0x0
 
     val buffer = BufferTools.allocate(HeaderSize)
     writeFrameHeader(headerBuffer.remaining(), FrameTypes.CONTINUATION, flag.toByte, streamId, buffer)

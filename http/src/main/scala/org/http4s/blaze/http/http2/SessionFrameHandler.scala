@@ -139,7 +139,7 @@ private abstract class SessionFrameHandler[StreamState <: Http2StreamState](
         Continue // nop
 
       case Some(stream) =>
-        val result = stream.flowWindow.outboundAcked(sizeIncrement)
+        val result = stream.flowWindow.streamOutboundAcked(sizeIncrement)
         if (result.success) {
           stream.outboundFlowWindowChanged()
         }

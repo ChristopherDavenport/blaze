@@ -20,6 +20,21 @@ sealed abstract class Http2Exception(msg: String) extends Exception(msg) with No
   /** Determine if this is a stream or connection error */
   final def isStreamError: Boolean = stream > 0
 
+  /** Convert this exception to a stream exception
+    *
+    * @note If this is already a stream exception but with a different stream id, the id will be changed
+    */
+  final def toStreamException(streamId: Int): Http2StreamException = this match {
+    case ex: Http2StreamException if ex.stream == streamId => ex
+    case ex => new Http2StreamException(streamId, ex.code, ex.getMessage)
+  }
+
+  /** Convert this exception to a session exception */
+  final def toSessionException(): Http2SessionException = this match {
+    case Http2StreamException(_, code, msg) => Http2SessionException(code, msg)
+    case ex: Http2SessionException => ex
+  }
+
   /** Was the exception due to refusal by the peer.
     *
     * These exceptions are safe to automatically retry even if the HTTP method
@@ -52,10 +67,7 @@ object Http2Exception {
     def rst(stream: Int): Http2Exception = rst(stream, name)
 
     /** Create a Http2Exception with the requisite stream id */
-    def rst(stream: Int, msg: String): Http2Exception = {
-      require(stream > 0)
-      Http2StreamException(stream, code, msg)
-    }
+    def rst(stream: Int, msg: String): Http2Exception = Http2StreamException(stream, code, msg)
 
     /** Extract the optional stream id and the exception message */
     def unapply(ex: Http2Exception): Option[(Option[Int], String)] = {

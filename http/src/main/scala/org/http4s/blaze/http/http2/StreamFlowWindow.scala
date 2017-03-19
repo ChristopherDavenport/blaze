@@ -40,7 +40,7 @@ abstract class StreamFlowWindow {
   def peerSettingsInitialWindowChange(delta: Int): MaybeError
 
   /** Signal that a stream window update was received for `count` bytes */
-  def outboundAcked(count: Int): MaybeError
+  def streamOutboundAcked(count: Int): MaybeError
 
   /** Request to withdraw bytes from the outbound window of the stream
     * and the session.
@@ -69,5 +69,5 @@ abstract class StreamFlowWindow {
   def inboundConsumed(count: Int): Unit
 
   /** Signal that a stream window update was sent for `count` bytes */
-  def inboundAcked(count: Int): Unit
+  def streamInboundAcked(count: Int): Unit
 }
