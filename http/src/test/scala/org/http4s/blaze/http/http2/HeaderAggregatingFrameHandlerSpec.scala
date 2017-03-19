@@ -32,7 +32,7 @@ class HeaderAggregatingFrameHandlerSpec extends Specification {
       val hs = Seq("foo" -> "bar", "biz" -> "baz")
       val hsBuf = encodeHeaders(hs)
 
-      val bs = Http20FrameSerializer.mkHeaderFrame(1, hsBuf, None, true, true, 0.toByte)
+      val bs = Http20FrameSerializer.mkHeaderFrame(1, None, true, true, 0.toByte, hsBuf)
 
       dec(1, None, true, hs).decodeBuffer(BufferTools.joinBuffers(bs)) must_== Halt
     }
@@ -41,7 +41,7 @@ class HeaderAggregatingFrameHandlerSpec extends Specification {
       val hs = Seq("foo" -> "bar", "biz" -> "baz")
       val hsBuf = encodeHeaders(hs)
       val first = BufferTools.takeSlice(hsBuf, hsBuf.remaining() - 1)
-      val bs = Http20FrameSerializer.mkHeaderFrame(1, first, None, false, true, 0.toByte)
+      val bs = Http20FrameSerializer.mkHeaderFrame(1, None, false, true, 0.toByte, first)
 
       val decoder = dec(1, None, true, hs)
 
@@ -56,7 +56,7 @@ class HeaderAggregatingFrameHandlerSpec extends Specification {
 
     "Make a round trip with a continuation frame" in {
       val hs = Seq("foo" -> "bar", "biz" -> "baz")
-      val bs = Http20FrameSerializer.mkHeaderFrame(1, BufferTools.emptyBuffer, None, false, true, 0.toByte)
+      val bs = Http20FrameSerializer.mkHeaderFrame(1, None, false, true, 0.toByte, BufferTools.emptyBuffer)
 
       val decoder = dec(1, None, true, hs)
 
@@ -72,7 +72,7 @@ class HeaderAggregatingFrameHandlerSpec extends Specification {
     "Make a round trip with a continuation frame" in {
       val hs1 = Seq("foo" -> "bar")
       val hs2 = Seq("biz" -> "baz")
-      val bs = Http20FrameSerializer.mkHeaderFrame(1, encodeHeaders(hs1), None, false, true, 0.toByte)
+      val bs = Http20FrameSerializer.mkHeaderFrame(1, None, false, true, 0.toByte, encodeHeaders(hs1))
 
       val decoder = dec(1, None, true, hs1 ++ hs2)
 
@@ -86,7 +86,7 @@ class HeaderAggregatingFrameHandlerSpec extends Specification {
     }
 
     "Fail on invalid frame sequence (bad streamId)" in {
-      val bs = Http20FrameSerializer.mkHeaderFrame(1, BufferTools.emptyBuffer, None, false, true, 0.toByte)
+      val bs = Http20FrameSerializer.mkHeaderFrame(1, None, false, true, 0.toByte, BufferTools.emptyBuffer)
 
       val decoder = dec(1, None, true, Seq())
 
@@ -100,7 +100,7 @@ class HeaderAggregatingFrameHandlerSpec extends Specification {
     }
 
     "Fail on invalid frame sequence (wrong frame type)" in {
-      val bs = Http20FrameSerializer.mkHeaderFrame(1, BufferTools.emptyBuffer, None, false, true, 0.toByte)
+      val bs = Http20FrameSerializer.mkHeaderFrame(1, None, false, true, 0.toByte, BufferTools.emptyBuffer)
 
       val decoder = dec(1, None, true, Seq())
 

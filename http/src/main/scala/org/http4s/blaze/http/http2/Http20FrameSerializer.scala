@@ -10,12 +10,12 @@ private object Http20FrameSerializer {
   import bits._
 
   // Override the scala provided `require(pred, => msg)` to avoid the thunks
-  private def require(predicate: Boolean, msg: String): Unit = {
+  private[this] def require(predicate: Boolean, msg: String): Unit = {
     if (!predicate)
       throw new IllegalArgumentException(msg)
   }
 
-  def mkDataFrame(streamId: Int, data: ByteBuffer, endStream: Boolean, padding: Byte): Seq[ByteBuffer] = {
+  def mkDataFrame(streamId: Int, endStream: Boolean, padding: Byte, data: ByteBuffer): Seq[ByteBuffer] = {
     // TODO: Setting a padding length of 0 is valid and a way to pad exactly 1 byte.
     // See note at the end of https://tools.ietf.org/html/rfc7540#section-6.1
 
@@ -44,11 +44,11 @@ private object Http20FrameSerializer {
   }
 
   def mkHeaderFrame(streamId: Int,
-                    headerData: ByteBuffer,
                     priority: Option[Priority],
                     endHeaders: Boolean,
                     endStream: Boolean,
-                    padding: Byte): Seq[ByteBuffer] = {
+                    padding: Byte,
+                    headerData: ByteBuffer): Seq[ByteBuffer] = {
 
     // TODO: Setting a padding length of 0 is valid and a way to pad exactly 1 byte.
     // See note at the end of https://tools.ietf.org/html/rfc7540#section-6.1
@@ -222,17 +222,17 @@ private object Http20FrameSerializer {
 
   //////////////////////////////////////////////////////////////////////////////////////////
 
-  private def writePriority(p: Priority, buffer: ByteBuffer): Unit = {
+  private[this] def writePriority(p: Priority, buffer: ByteBuffer): Unit = {
     buffer.putInt(p.dependentStreamId | (if (p.exclusive) Masks.exclusive else 0))
     buffer.put(((p.priority - 1) & 0xff).toByte)
   }
 
-  private def paddedTail(padBytes: Int): List[ByteBuffer] = {
+  private[this] def paddedTail(padBytes: Int): List[ByteBuffer] = {
     if (padBytes > 0) BufferTools.allocate(padBytes)::Nil
     else             Nil
   }
 
-  private def writeFrameHeader(length: Int, frameType: Byte, flags: Byte, streamdId: Int, buffer: ByteBuffer): Unit = {
+  private[this] def writeFrameHeader(length: Int, frameType: Byte, flags: Byte, streamdId: Int, buffer: ByteBuffer): Unit = {
     buffer.put((length >>> 16 & 0xff).toByte)
           .put((length >>> 8  & 0xff).toByte)
           .put((length        & 0xff).toByte)

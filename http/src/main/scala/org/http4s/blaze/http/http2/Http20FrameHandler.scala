@@ -42,15 +42,13 @@ trait Http20FrameHandler {
     *
     * @param streamId stream id associated with this data frame. The codec will never set this to 0.
     * @param priority optional priority data associated with this frame.
-    * @param end_headers This frame contains the entire headers block and is not followed by CONTINUATION frames.
-    * @param end_stream The headers block is the last inbound block of the stream. This MAY be followed by
+    * @param endHeaders This frame contains the entire headers block and is not followed by CONTINUATION frames.
+    * @param endStream The headers block is the last inbound block of the stream. This MAY be followed by
     *                   CONTINUATION frames, which are considered part of this headers block.
     * @param data compressed binary header data
     * @return
     */
-  def onHeadersFrame(
-    streamId: Int, priority: Option[Priority], end_headers: Boolean,
-    end_stream: Boolean, data: ByteBuffer ): Http2Result
+  def onHeadersFrame(streamId: Int, priority: Option[Priority], endHeaders: Boolean, endStream: Boolean, data: ByteBuffer): Http2Result
 
   /** Called on successful receipt of a CONTINUATION frame
     *

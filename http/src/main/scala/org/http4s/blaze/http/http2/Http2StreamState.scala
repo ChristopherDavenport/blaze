@@ -46,11 +46,11 @@ private abstract class Http2StreamState(
 
   // Similar to the state of halfClosedLocal
   // we can no longer send frames other than WINDOW_UPDATE, PRIORITY, and RST_STREAM
-  private[this] var sentEOS: Boolean = false
+  private[this] var sentEndStream: Boolean = false
 
   // Similar to the state of halfClosedRemote
   // peer can no longer send frames other than WINDOW_UPDATE, PRIORITY, and RST_STREAM
-  private[this] var receivedEOS: Boolean = false
+  private[this] var receivedEndStream: Boolean = false
 
   override def readRequest(size: Int): Future[StreamMessage] = {
     val p = Promise[StreamMessage]
@@ -59,7 +59,7 @@ private abstract class Http2StreamState(
       def run(): Unit = {
         if (pendingRead != null) p.failure(new IllegalStateException()) // TODO: should fail the stream, send RST, etc.
         else pendingInboundMessages.poll() match {
-          case null if receivedEOS => p.tryFailure(EOF)
+          case null if receivedEndStream => p.tryFailure(EOF)
           case null => pendingRead = p
           case msg =>
             flowWindow.inboundConsumed(msg.flowBytes)
@@ -84,17 +84,17 @@ private abstract class Http2StreamState(
 
   // Invoke methods are intended to only be called from within the context of the session
   protected def invokeStreamWrite(msg: StreamMessage, p: Promise[Unit]): Unit = {
-    if (sentEOS) {
+    if (sentEndStream) {
       p.tryFailure(new IllegalStateException(s"Stream($streamId) already closed"))
     } else if (writePromise != null) {
       closeWithError(Some(Http2Exception.INTERNAL_ERROR.rst(streamId)))
       p.tryFailure(new IllegalStateException(s"Already a pending write on this stream($streamId)"))
     }
     else if (streamIsClosed) {
-      sentEOS = msg.endStream
+      sentEndStream = msg.endStream
       p.tryFailure(EOF)
     } else {
-      sentEOS = msg.endStream
+      sentEndStream = msg.endStream
       pendingOutboundFrame = msg
       writePromise = p
 
@@ -124,14 +124,14 @@ private abstract class Http2StreamState(
     if (writePromise == null) return Nil
 
     pendingOutboundFrame match {
-      case HeadersFrame(priority, eos, hs) =>
-        val data = http2FrameEncoder.headerFrame(streamId, hs, priority, eos)
+      case HeadersFrame(priority, endStream, hs) =>
+        val data = http2FrameEncoder.headerFrame(streamId, priority, endStream, hs)
         writePromise.trySuccess(())
         pendingOutboundFrame = null
         writePromise = null
         data
 
-      case DataFrame(eos, data) =>
+      case DataFrame(endStream, data) =>
         val requested = math.min(maxFrameSize, data.remaining)
         val allowedBytes = flowWindow.outboundRequest(requested)
 
@@ -139,7 +139,7 @@ private abstract class Http2StreamState(
 
         if (allowedBytes == pendingOutboundFrame.flowBytes) {
           // Writing the whole message
-          val buffers = http2FrameEncoder.dataFrame(streamId, data, eos)
+          val buffers = http2FrameEncoder.dataFrame(streamId, endStream, data)
           pendingOutboundFrame = null
           writePromise.trySuccess(())
           writePromise = null
@@ -151,7 +151,7 @@ private abstract class Http2StreamState(
         } else {
           // We take a chunk, and then reregister ourselves with the listener
           val slice = BufferTools.takeSlice(data, allowedBytes)
-          val buffers = http2FrameEncoder.dataFrame(streamId, slice, endStream = false)
+          val buffers = http2FrameEncoder.dataFrame(streamId, endStream = false, slice)
 
           if (flowWindow.streamOutboundWindow > 0) {
             // We were not limited by the flow window so signal interest in another write cycle.
@@ -184,17 +184,17 @@ private abstract class Http2StreamState(
 
   ///////////////////// Inbound messages ///////////////////////////////
 
-  final def invokeInboundData(eos: Boolean, data: ByteBuffer, flowBytes: Int): MaybeError = {
+  final def invokeInboundData(endStream: Boolean, data: ByteBuffer, flowBytes: Int): MaybeError = {
     // https://tools.ietf.org/html/rfc7540#section-5.1 section 'closed'
-    if (receivedEOS) {
+    if (receivedEndStream) {
       closeWithError(None) // the GOAWAY will be sent by the FrameHandler
       STREAM_CLOSED.goaway(s"Stream($streamId received DATA frame after EOS").toError
     } else if (streamIsClosed) {
       // Shouldn't get here: should have been removed from active streams
       STREAM_CLOSED.rst(streamId).toError
     } else if (flowWindow.inboundObserved(flowBytes)) {
-      receivedEOS = eos
-      val consumed = if (queueMessage(DataFrame(eos, data))) flowBytes else flowBytes - data.remaining()
+      receivedEndStream = endStream
+      val consumed = if (queueMessage(DataFrame(endStream, data))) flowBytes else flowBytes - data.remaining()
       flowWindow.inboundConsumed(consumed)
       Continue
     }
@@ -205,17 +205,17 @@ private abstract class Http2StreamState(
     }
   }
 
-  final def invokeInboundHeaders(priority: Option[Priority], eos: Boolean, headers: Seq[(String,String)]): MaybeError = {
+  final def invokeInboundHeaders(priority: Option[Priority], endStream: Boolean, headers: Seq[(String,String)]): MaybeError = {
     // https://tools.ietf.org/html/rfc7540#section-5.1 section 'closed'
-    if (receivedEOS) {
+    if (receivedEndStream) {
       closeWithError(None) // the GOAWAY will be sent by the FrameHandler
       STREAM_CLOSED.goaway(s"Stream($streamId received DATA frame after EOS").toError
     } else if (streamIsClosed) {
       // Shouldn't get here: should have been removed from active streams
       STREAM_CLOSED.rst(streamId).toError
     } else {
-      receivedEOS = eos
-      queueMessage(HeadersFrame(priority, eos, headers))
+      receivedEndStream = endStream
+      queueMessage(HeadersFrame(priority, endStream, headers))
       Continue
     }
   }
@@ -234,7 +234,7 @@ private abstract class Http2StreamState(
 
       val http2Ex = t match {
         // Gotta make sure both sides agree that this stream is closed
-        case None if !(sentEOS && receivedEOS) => Some (STREAM_CLOSED.rst(streamId))
+        case None if !(sentEndStream && receivedEndStream) => Some (CANCEL.rst(streamId))
         case None => None
         case Some(t: Http2Exception) => Some(t)
         case Some(EOF) => None

@@ -251,8 +251,8 @@ class Http2StreamStateSpec extends Specification with Http2SpecTools {
         val tail = makePipeline(stage)
         tail.sendOutboundCommand(Command.Disconnect)
 
-        stage.onStreamFinishedResult must beLike{
-          case Some(Some(ex: Http2StreamException)) => ex.code must_== Http2Exception.STREAM_CLOSED.code
+        stage.onStreamFinishedResult must beLike {
+          case Some(Some(ex: Http2StreamException)) => ex.code must_== Http2Exception.CANCEL.code
         }
       }
 
@@ -263,8 +263,8 @@ class Http2StreamStateSpec extends Specification with Http2SpecTools {
         stage.invokeInboundHeaders(None, true, Nil) must_== Continue
         tail.sendOutboundCommand(Command.Disconnect)
 
-        stage.onStreamFinishedResult must beLike{
-          case Some(Some(ex: Http2StreamException)) => ex.code must_== Http2Exception.STREAM_CLOSED.code
+        stage.onStreamFinishedResult must beLike {
+          case Some(Some(ex: Http2StreamException)) => ex.code must_== Http2Exception.CANCEL.code
         }
       }
 
@@ -276,8 +276,8 @@ class Http2StreamStateSpec extends Specification with Http2SpecTools {
         stage.performStreamWrite().isEmpty must beFalse // actually wrote the data
         tail.sendOutboundCommand(Command.Disconnect)
 
-        stage.onStreamFinishedResult must beLike{
-          case Some(Some(ex: Http2StreamException)) => ex.code must_== Http2Exception.STREAM_CLOSED.code
+        stage.onStreamFinishedResult must beLike {
+          case Some(Some(ex: Http2StreamException)) => ex.code must_== Http2Exception.CANCEL.code
         }
       }
 

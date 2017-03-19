@@ -5,11 +5,10 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets.US_ASCII
 
 import com.twitter.hpack.Encoder
-import org.http4s.blaze.http.http2.Http2Settings.DefaultSettings
 
 
 /** Simple Headers type for use in blaze and testing */
-final class HeaderEncoder(private var maxTableSize: Int) {
+class HeaderEncoder(private var maxTableSize: Int) {
 
 //  require(maxTableSize <= DefaultSettings.HEADER_TABLE_SIZE, "Invalid initial table size")
 

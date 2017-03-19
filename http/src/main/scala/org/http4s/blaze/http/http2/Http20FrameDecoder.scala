@@ -10,9 +10,7 @@ import org.http4s.blaze.util.BufferTools
 
 /* The job of the Http20FrameCodec is to slice the ByteBuffers. It does
    not attempt to decode headers or perform any size limiting operations */
-class Http20FrameDecoder(
-    http2Settings: Http2Settings,
-    handler: Http20FrameHandler) {
+class Http20FrameDecoder(mySettings: Http2Settings, handler: Http20FrameHandler) {
 
   import bits._
   import Http20FrameDecoder._
@@ -31,7 +29,7 @@ class Http20FrameDecoder(
 
     // This concludes the 9 byte header. The rest is payload
 
-    if (len > http2Settings.maxFrameSize) {
+    if (len > mySettings.maxFrameSize) {
       FRAME_SIZE_ERROR.goaway(s"HTTP2 packet is too large to handle. Stream: $streamId").toError
     } else if (handler.inHeaderSequence && frameType != FrameTypes.CONTINUATION) {
     // We are in the middle of some header frames which is a no-go

@@ -31,42 +31,42 @@ final class Http2FrameEncoder(
   def pingAck(data: Array[Byte]): ByteBuffer =
     Http20FrameSerializer.mkPingFrame(true, data)
 
-  def dataFrame(streamId: Int, data: ByteBuffer, endStream: Boolean): Seq[ByteBuffer] = {
+  def dataFrame(streamId: Int, endStream: Boolean, data: ByteBuffer): Seq[ByteBuffer] = {
     val limit = maxFrameSize
-    if (data.remaining <= limit) Http20FrameSerializer.mkDataFrame(streamId, data, endStream, 0)
+    if (data.remaining <= limit) Http20FrameSerializer.mkDataFrame(streamId, endStream, padding = 0, data)
     else { // need to fragment
       val acc = new VectorBuilder[ByteBuffer]
       while(data.hasRemaining) {
         val thisData = BufferTools.takeSlice(data, math.min(data.remaining, limit))
         val eos = endStream && !data.hasRemaining
-        acc ++= Http20FrameSerializer.mkDataFrame(streamId, thisData, eos, 0 /*PADDING*/)
+        acc ++= Http20FrameSerializer.mkDataFrame(streamId, eos, padding = 0, thisData)
       }
       acc.result()
     }
   }
 
   def headerFrame(streamId: Int,
-                  headers: Seq[(String, String)],
                   priority: Option[Priority],
-                  endStream: Boolean): Seq[ByteBuffer] = {
+                  endStream: Boolean,
+                  headers: Seq[(String, String)]): Seq[ByteBuffer] = {
     val rawHeaders = headerEncoder.encodeHeaders(headers)
 
-    val maxHeadersHeaderSize = 5 // priority(4) + weight(1), padding = 0
     val limit = maxFrameSize
+    val headersPrioritySize = if (priority.isDefined) 5 else 0 // priority(4) + weight(1), padding = 0
 
-    if (rawHeaders.remaining() + maxHeadersHeaderSize <= limit) {
-      Http20FrameSerializer.mkHeaderFrame(streamId, rawHeaders, priority, true /*END_HEADERS */, endStream, 0 /*padding*/)
+    if (rawHeaders.remaining() + headersPrioritySize <= limit) {
+      Http20FrameSerializer.mkHeaderFrame(streamId, priority, endHeaders = true, endStream, padding = 0, rawHeaders)
     } else {
       // need to fragment
       val acc = new VectorBuilder[ByteBuffer]
 
-      val headersBuf = BufferTools.takeSlice(rawHeaders, limit - maxHeadersHeaderSize)
-      acc ++= Http20FrameSerializer.mkHeaderFrame(streamId, headersBuf, priority, false /*END_HEADERS */, endStream, 0 /*padding*/)
+      val headersBuf = BufferTools.takeSlice(rawHeaders, limit - headersPrioritySize)
+      acc ++= Http20FrameSerializer.mkHeaderFrame(streamId, priority, endHeaders = false, endStream, padding = 0, headersBuf)
 
       while(rawHeaders.hasRemaining) {
         val size = math.min(limit, rawHeaders.remaining)
         val continueBuf = BufferTools.takeSlice(rawHeaders, size)
-        val endHeaders = rawHeaders.hasRemaining
+        val endHeaders = !rawHeaders.hasRemaining
         acc ++= Http20FrameSerializer.mkContinuationFrame(streamId, endHeaders, continueBuf)
       }
       acc.result()

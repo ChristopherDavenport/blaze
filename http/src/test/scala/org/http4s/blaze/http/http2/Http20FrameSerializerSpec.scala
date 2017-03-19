@@ -37,7 +37,7 @@ object CodecUtils {
   }
 }
 
-class Http20FrameCodecSpec extends Specification {
+class Http20FrameSerializerSpec extends Specification {
   import CodecUtils._
 
   "DATA frame" should {
@@ -57,18 +57,18 @@ class Http20FrameCodecSpec extends Specification {
     })
 
     "make round trip" in {
-      val buff1 = joinBuffers(Http20FrameSerializer.mkDataFrame(1, dat, true, 0))
+      val buff1 = joinBuffers(Http20FrameSerializer.mkDataFrame(1, true, 0, dat))
       dec(1, true, dat.remaining()).decodeBuffer(buff1) must_== Continue
     }
 
     "Decode 'END_STREAM flag" in {
       // payload size is buffer + padding + 1 byte
-      val buff2 = joinBuffers(Http20FrameSerializer.mkDataFrame(3, dat, false, 100))
+      val buff2 = joinBuffers(Http20FrameSerializer.mkDataFrame(3, false, 100, dat))
       dec(3, false, dat.remaining() + 100).decodeBuffer(buff2) must_== Continue
     }
 
     "Decode padded buffers" in {
-      val buff3 = addBonus(Http20FrameSerializer.mkDataFrame(1, dat, true, 100))
+      val buff3 = addBonus(Http20FrameSerializer.mkDataFrame(1, true, 100, dat))
       dec(1, true, dat.remaining() + 100).decodeBuffer(buff3) must_== Continue
       buff3.remaining() must_== bonusSize
     }
@@ -97,27 +97,29 @@ class Http20FrameCodecSpec extends Specification {
     })
 
     "make round trip" in {
-      val buff1 = joinBuffers(Http20FrameSerializer.mkHeaderFrame(1, dat, None, true, true, 0))
+      val buff1 = joinBuffers(Http20FrameSerializer.mkHeaderFrame(1, None, true, true, 0, dat))
       dec(1, None, true, true).decodeBuffer(buff1) must_== Continue
       buff1.remaining() must_== 0
 
-      val buff2 = joinBuffers(Http20FrameSerializer.mkHeaderFrame(2, dat, Some(Priority(3, false, 6)), true, false, 0))
-      dec(2, Some(Priority(3, false, 6)), true, false).decodeBuffer(buff2) must_== Continue
+      val priority = Priority(3, false, 6)
+
+      val buff2 = joinBuffers(Http20FrameSerializer.mkHeaderFrame(2, Some(priority), true, false, 0, dat))
+      dec(2, Some(priority), true, false).decodeBuffer(buff2) must_== Continue
       buff2.remaining() must_== 0
     }
 
     "preserve padding" in {
-      val buff = addBonus(Http20FrameSerializer.mkHeaderFrame(1, dat, None, true, true, 0))
+      val buff = addBonus(Http20FrameSerializer.mkHeaderFrame(1, None, true, true, 0, dat))
       dec(1, None, true, true).decodeBuffer(buff) must_== Continue
       buff.remaining() must_== bonusSize
     }
 
     "fail on bad stream ID" in {
-      Http20FrameSerializer.mkHeaderFrame(0, dat, None, true, true, 0) must throwA[Exception]
+      Http20FrameSerializer.mkHeaderFrame(0, None, true, true, 0, dat) must throwA[Exception]
     }
 
     "fail on bad padding" in {
-      Http20FrameSerializer.mkHeaderFrame(1, dat, None, true, true, -10) must throwA[Exception]
+      Http20FrameSerializer.mkHeaderFrame(1, None, true, true, -10, dat) must throwA[Exception]
     }
   }
 

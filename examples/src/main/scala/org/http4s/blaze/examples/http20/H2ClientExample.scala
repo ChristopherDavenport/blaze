@@ -5,15 +5,21 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.zip.GZIPInputStream
 
+import org.http4s.blaze.http.HttpClient
 import org.http4s.blaze.http.http2.client.Http2Client
+import org.http4s.blaze.util.Execution
 
 import scala.annotation.tailrec
 import scala.concurrent.{Await, Future}
-import scala.concurrent.ExecutionContext.Implicits.global
+//import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
 
 object H2ClientExample {
+
+  implicit val ec = Execution.trampoline
+
+  val h2Clients: Array[HttpClient] = Array.tabulate(3){_ => Http2Client.newH2Client() }
 
   private def gunzipString(data: ByteBuffer): String = {
     val is = new InputStream {
@@ -59,11 +65,12 @@ object H2ClientExample {
     }
   }
 
-  def callLocalhost(tag: Int): Future[String] = {
-    Http2Client.defaultH2Client.GET("https://localhost:8443/bigstring") { resp =>
+  def callLocalhost(tag: Int): Future[Int] = {
+    val dest = "bigstring"
+    h2Clients(tag % h2Clients.length).GET(s"https://localhost:8443/$dest") { resp =>
       resp.body.accumulate().map { bytes =>
-        println(s"Finished response $tag of size ${bytes.remaining()}")
-        StandardCharsets.UTF_8.decode(bytes).toString
+        //println(s"Finished response $tag of size ${bytes.remaining()}")
+        bytes.remaining
       }
     }
   }
@@ -71,19 +78,22 @@ object H2ClientExample {
   def main(args: Array[String]): Unit = {
     println("Hello, world!")
 
-    val r1 = Await.result(callLocalhost(-1), 5.seconds)
+    Await.result(Future.sequence((0 until h2Clients.length).map(callLocalhost)), 5.seconds)
 
-    val fresps = (0 until 1000).map { i =>
-      callLocalhost(i).map(i -> _.length)
+    def fresps(i: Int) = (h2Clients.length until i).map { i =>
+      callLocalhost(i).map(i -> _)
     }
 
-    val resps = Await.result(Future.sequence(fresps), 50.seconds)
+    Await.result(Future.sequence(fresps(100)), 500.seconds)
+    val start = System.currentTimeMillis
+    val resps = Await.result(Future.sequence(fresps(500)), 500.seconds)
+    val duration = System.currentTimeMillis - start
 
     val chars = resps.foldLeft(0){ case (acc, (i, len)) =>
       acc + len
     }
 
-    println(s"The total body length of ${resps.length} messages: $chars")
+    println(s"The total body length of ${resps.length} messages: $chars. Took $duration millis")
 
 //    println(s"First response:\n" + r1)
   }

@@ -48,6 +48,8 @@ private abstract class Http2ConnectionImpl(
     }
   }
 
+  protected val logger: org.log4s.Logger
+
   // TODO: What about peer information?
   // Need to be able to create new stream pipelines
   protected def newInboundStream(streamId: Int): Option[LeafBuilder[StreamMessage]]
@@ -61,9 +63,19 @@ private abstract class Http2ConnectionImpl(
   // Called when the session has completed all its operations
   protected def sessionTerminated(): Unit
 
+  final protected def activeStreamCount: Int = activeStreams.size
+
   // TODO: awkward...
   // Create a new decoder wrapping this Http2FrameHandler
   protected def newHttp2Decoder(handler: Http20FrameHandler): Http20FrameDecoder
+
+  /** Acquire a new `HeadStage[StreamMessage]` that will be a part of this `Session`.
+    *
+    * @note The resulting stage acquires new stream id's lazily to comply with protocol
+    *       requirements, and thus is not assigned a valid stream id until the first
+    *       `HeadersFrame` has been sent, which may fail.
+    */
+  final def newOutboundStream(): HeadStage[StreamMessage] = new OutboundStreamState
 
   // Start the session. This entails starting the read loop
   def startSession(): Unit = synchronized {
@@ -127,19 +139,6 @@ private abstract class Http2ConnectionImpl(
         Execution.scheduler.schedule(work, sessionExecutor, gracePeriod)
     }
   }
-
-  /** Acquire a new `HeadStage[StreamMessage]` that will be a part of this `Session`.
-    *
-    * @note The resulting stage acquires new stream id's lazily to comply with protocol
-    *       requirements, and thus is not assigned a valid stream id until the first
-    *       `HeadersFrame` has been sent, which may fail.
-    */
-  final def newOutboundStream(): HeadStage[StreamMessage] = new OutboundStreamState
-
-  final protected def activeStreamCount: Int = activeStreams.size
-
-  // We need to get a logger somehow...
-  protected val logger: org.log4s.Logger
 
   /** Get the current state of the `Session` */
   final def state: ConnectionState = currentState
