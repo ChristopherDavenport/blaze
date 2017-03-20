@@ -39,32 +39,26 @@ private class ClientSessionManagerImpl(config: HttpClientConfig) extends ClientS
   private[this] val sessionCache = new java.util.HashMap[ConnectionId, java.util.Collection[HttpClientSession]]
 
   override def acquireSession(request: HttpRequest): Future[HttpClientSession] = {
-    logger.info(s"Acquiring session for request $request")
-    val urlComposition = UrlComposition(request.uri)  // TODO: this could fail
+    logger.debug(s"Acquiring session for request $request")
+    val urlComposition = UrlComposition(request.url)  // TODO: this could fail
     val id = getId(urlComposition)
     val session = findExistingSession(id)
 
     if (session == null) createNewSession(urlComposition, id)
     else {
-      logger.info(s"Found hot session for id $id: $session")
+      logger.debug(s"Found hot session for id $id: $session")
       Future.successful(session)
     }
   }
 
+  // WARNING: can emit `null`. For internal use only
   private[this] def findExistingSession(id: ConnectionId): HttpClientSession = sessionCache.synchronized {
-    var session: HttpClientSession = null
-
-    def printit(i: Http2ClientSession): Boolean = {
-      println(s"Quality: ${i.quality}, is closed: ${i.isClosed}")
-      false
-    }
-
     sessionCache.get(id) match {
-      case null => () // nop
+      case null => null // nop
       case sessions =>
+        var session: HttpClientSession = null
         val it = sessions.iterator
         while(session == null && it.hasNext) it.next() match {
-          case v: Http2ClientSession if printit(v) => ???
           case h2: Http2ClientSession if h2.quality > 0.1 =>
             session = h2
 
@@ -84,13 +78,13 @@ private class ClientSessionManagerImpl(config: HttpClientConfig) extends ClientS
         if (sessions.isEmpty) {
           sessionCache.remove(id)
         }
-    }
 
-    session
+        session
+    }
   }
 
   private[this] def createNewSession(urlComposition: UrlComposition, id: ConnectionId): Future[HttpClientSession] = {
-    logger.info(s"Creating new session for id $id")
+    logger.debug(s"Creating new session for id $id")
     val p = Promise[HttpClientSession]
 
     socketFactory.connect(urlComposition.getAddress).onComplete {
@@ -134,10 +128,14 @@ private class ClientSessionManagerImpl(config: HttpClientConfig) extends ClientS
     * either cache the session for future use or close it.
     */
   override def returnSession(session: HttpClientSession): Unit = {
-    logger.info(s"Returning session $session")
+    logger.debug(s"Returning session $session")
     session match {
       case _ if session.isClosed => () // nop
       case _: Http2ClientSession => () // nop
+      case h1: Http1ClientSession if !h1.isReady =>
+        logger.debug(s"Closing unready session $h1")
+        h1.closeNow()
+
       case proxy: Http1SessionProxy => addSessionToCache(proxy.id, proxy)
       case other => sys.error("The impossible happened!")
     }
@@ -145,7 +143,7 @@ private class ClientSessionManagerImpl(config: HttpClientConfig) extends ClientS
 
   /** Close the `SessionManager` and free any resources */
   override def close(): Unit = {
-    logger.info(s"Closing session")
+    logger.debug(s"Closing session")
     ???
   }
 
@@ -162,6 +160,6 @@ private class ClientSessionManagerImpl(config: HttpClientConfig) extends ClientS
       collection.add(session)
       collection.size
     }
-    logger.info(s"Added session $session. Now ${size} sessions for id $id")
+    logger.debug(s"Added session $session. Now ${size} sessions for id $id")
   }
 }

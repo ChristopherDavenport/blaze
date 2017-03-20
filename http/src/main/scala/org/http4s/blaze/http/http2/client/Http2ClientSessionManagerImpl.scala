@@ -31,7 +31,7 @@ class Http2ClientSessionManagerImpl(
 
 
   override def acquireSession(request: HttpRequest): Future[HttpClientSession] = {
-    val helper = UrlTools.UrlComposition(request.uri)
+    val helper = UrlTools.UrlComposition(request.url)
 
     sessionCache.synchronized {
       sessionCache.get(helper.authority) match {

@@ -21,8 +21,8 @@ private[http] final class BasicHttp1ClientSessionManager(
   private[this] val factory = new ClientChannelFactory(group = config.group)
 
   override def acquireSession(request: HttpRequest): Future[HttpClientSession] = {
-    val urlComposition = UrlComposition(request.uri)  // TODO: this could fail
-    logger.debug(s"Attempting to acquire session for address ${request.uri} with url decomposition $urlComposition")
+    val urlComposition = UrlComposition(request.url)  // TODO: this could fail
+    logger.debug(s"Attempting to acquire session for address ${request.url} with url decomposition $urlComposition")
     factory.connect(urlComposition.getAddress)
       .map(connectPipeline(urlComposition, _))(Execution.directec)
   }

@@ -42,19 +42,6 @@ private[http] class Http1ClientStage(config: HttpClientConfig)
     }
   }
 
-  /** Prepares the stage for a new dispatch.
-    *
-    * @return `true` if the stage is now ready, `false` otherwise.
-    */
-  def prepareForDispatch(): Boolean = stageLock.synchronized {
-    if (status == HttpClientSession.Ready) {
-      codec.reset()
-      dispatchId += 1
-      true
-    }
-    else false
-  }
-
   // TODO: we should put this on a timer...
   override def close(within: Duration): Unit = stageLock.synchronized {
     state match {
@@ -86,6 +73,9 @@ private[http] class Http1ClientStage(config: HttpClientConfig)
       case r@Running(true, true) =>
         logger.debug("Initiating dispatch cycle")
 
+        codec.reset()
+        dispatchId += 1
+
         r.readChannelClear = false  // we are no longer idle, and the read/write channels
         r.writeChannelClear = false // must be considered contaminated.
 
@@ -113,12 +103,13 @@ private[http] class Http1ClientStage(config: HttpClientConfig)
         receiveResponse(BufferTools.emptyBuffer, p)
         p.future
 
-      case state => Future(illegalState("initial dispatch", state))
+      case state => Future.failed(illegalState("initial dispatch", state))
     }
   }
 
   private def receiveResponse(buffer: ByteBuffer, p: Promise[ReleaseableResponse]): Unit = stageLock.synchronized {
     logger.debug(s"Receiving response. $buffer, :\n${bufferAsString(buffer)}\n")
+
     if (!buffer.hasRemaining) channelReadThenReceive(p)
     else if (!codec.preludeComplete && codec.parsePrelude(buffer)) {
       val prelude = codec.getResponsePrelude
@@ -135,6 +126,7 @@ private[http] class Http1ClientStage(config: HttpClientConfig)
     }
   }
 
+  // Must be called from within the stage lock
   private def channelReadThenReceive(p: Promise[ReleaseableResponse]): Unit = {
     state match {
       case Running(_, false) => channelRead().onComplete {
@@ -315,17 +307,13 @@ private object Http1ClientStage {
   // Doesn't attempt to do any request validation, just encodes
   // the request line and the headers and the trailing "\r\n"
   def encodeRequestPrelude(request: HttpRequest): ByteBuffer = {
-
+    val uri = java.net.URI.create(request.url)
     val sb = new StringBuilder(256)
 
-    sb.append(request.method).append(' ').append(request.uri).append(' ').append("HTTP/1.1\r\n")
-
-    request.headers.foreach { case (k, v) =>
-      sb.append(k)
-      if (v.length > 0) sb.append(": ").append(v)
-      sb.append("\r\n")
-    }
-
+    sb.append(request.method).append(' ')
+    appendPath(sb, uri)
+    sb.append(' ').append("HTTP/1.1\r\n")
+    appendHeaders(sb, uri, request.headers)
     sb.append("\r\n")
 
     ByteBuffer.wrap(sb.result().getBytes(StandardCharsets.ISO_8859_1))
@@ -334,5 +322,36 @@ private object Http1ClientStage {
   def bufferAsString(buffer: ByteBuffer): String = {
     val b = buffer.duplicate()
     StandardCharsets.UTF_8.decode(b).toString
+  }
+
+  private[this] def appendPath(sb: StringBuilder, uri: java.net.URI): Unit = {
+    val path = valueOrDefault(uri.getRawPath, "/")
+    val queryString = valueOrDefault(uri.getRawQuery, "")
+
+    sb.append(path)
+
+    if (!queryString.isEmpty) {
+      sb.append("?").append(queryString)
+    }
+  }
+
+  private def appendHeaders(sb: StringBuilder, uri: java.net.URI, hs: Headers): Unit = {
+    var hasHostHeader: Boolean = false
+
+    hs.foreach { case (k, v) =>
+      if (!hasHostHeader && k.equalsIgnoreCase("Host")) hasHostHeader = true
+      sb.append(k)
+      if (v.length > 0) sb.append(": ").append(v)
+      sb.append("\r\n")
+    }
+
+    if (!hasHostHeader) {
+      sb.append(s"Host: ").append(uri.getAuthority).append("\r\n")
+    }
+  }
+
+  private def valueOrDefault(str: String, default: String): String = str match {
+    case "" | null => default
+    case path => path
   }
 }

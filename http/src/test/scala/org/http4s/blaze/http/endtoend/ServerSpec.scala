@@ -17,7 +17,7 @@ class ServerSpec extends Specification {
   val helloWorld = "Hello, world!"
 
   val service: HttpService = { request =>
-    request.uri match {
+    request.url match {
       case "/hello" => Future.successful(RouteAction.Ok(helloWorld))
       case "/headers" => Future.successful {
         val str = request.headers

@@ -19,16 +19,15 @@ object ClientExample {
 
   def main(args: Array[String]): Unit = {
 
-    val fs = requests.map{ url =>
+    val fs = (requests ++ requests).map { url =>
       val r = client.GET(url){ response =>
         println(s"Status: ${response.status}")
         response.stringBody()
       }
 
-      Thread.sleep(1000) // give the h2 sessions time to materialize
+      Thread.sleep(500) // give the h2 sessions time to materialize
       r
     }
-
 
     val bodies = Await.result(Future.sequence(fs), 5.seconds)
     println(s"Read ${bodies.foldLeft(0)(_ + _.length)} bytes from ${bodies.length} requests")

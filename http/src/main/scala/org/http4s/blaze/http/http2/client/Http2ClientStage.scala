@@ -174,7 +174,7 @@ private class Http2ClientStage(request: HttpRequest, executor: ExecutionContext)
 
 private object Http2ClientStage {
   def makeHeaders(request: HttpRequest): Vector[(String, String)] = {
-    val breakdown = UrlComposition(request.uri)
+    val breakdown = UrlComposition(request.url)
     val hs = new VectorBuilder[(String, String)]
 
     // h2 pseudo headers

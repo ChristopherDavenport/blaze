@@ -4,7 +4,7 @@ import scala.concurrent.Future
 
 package object http {
   type Headers = Seq[(String, String)]
-  type Uri = String
+  type Url = String
   type Method = String
 
   // The basic type that represents a HTTP service
