@@ -345,7 +345,7 @@ final class SSLStage(engine: SSLEngine, maxWrite: Int = 1024*1024) extends MidSt
   }
 
   @tailrec
-  private def runTasks() {
+  private def runTasks(): Unit = {
     val task = engine.getDelegatedTask
     if (task != null) {
       task.run()
